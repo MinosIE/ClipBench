@@ -1,0 +1,1011 @@
+"""
+ClipBench - 后端服务
+基于 Flask + 本地 ffmpeg，提供视频拆分、截图、格式转换、压缩、裁剪等功能的 UI 操作台。
+"""
+
+import os
+import re
+import json
+import time
+import uuid
+import shutil
+import subprocess
+from pathlib import Path
+
+from flask import (
+    Flask, request, jsonify, send_file,
+    send_from_directory, abort, Response
+)
+from werkzeug.utils import secure_filename
+
+# 尝试引入 imageio-ffmpeg 作为 ffmpeg 的自动兜底来源（开箱即用，无需本地安装）
+try:
+    import imageio_ffmpeg
+    _HAS_IMAGEIO_FFMPEG = True
+except Exception:
+    _HAS_IMAGEIO_FFMPEG = False
+
+BASE_DIR = Path(__file__).resolve().parent
+UPLOAD_DIR = BASE_DIR / "uploads"
+OUTPUT_DIR = BASE_DIR / "outputs"
+STATIC_DIR = BASE_DIR / "static"
+
+for d in (UPLOAD_DIR, OUTPUT_DIR, STATIC_DIR):
+    d.mkdir(exist_ok=True)
+
+app = Flask(__name__, static_folder=str(STATIC_DIR))
+app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024 * 1024  # 4GB
+
+# 任务存储: task_id -> task info
+TASKS = {}
+TASKS_FILE = BASE_DIR / "tasks.json"
+
+
+def load_tasks():
+    if TASKS_FILE.exists():
+        try:
+            data = json.loads(TASKS_FILE.read_text(encoding="utf-8"))
+            TASKS.update(data)
+        except Exception:
+            pass
+
+
+def save_tasks():
+    try:
+        TASKS_FILE.write_text(
+            json.dumps(TASKS, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+
+load_tasks()
+
+
+# ---------------- ffmpeg 二进制解析 ----------------
+# 优先使用系统 PATH 中的 ffmpeg/ffprobe；未安装时回退到 imageio-ffmpeg
+# 提供的静态二进制（pip 安装 imageio-ffmpeg 时会自动下载对应平台版本），
+# 这样克隆仓库后即可直接运行，无需本地预先安装 ffmpeg。
+_FFMPEG_BIN = None
+_FFPROBE_BIN = None
+
+
+def _resolve_ffmpeg() -> str:
+    """返回可用的 ffmpeg 可执行文件路径"""
+    global _FFMPEG_BIN
+    if _FFMPEG_BIN is not None:
+        return _FFMPEG_BIN
+    # 1. 系统 PATH
+    found = shutil.which("ffmpeg")
+    # 2. imageio-ffmpeg 兜底
+    if not found and _HAS_IMAGEIO_FFMPEG:
+        try:
+            found = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            found = None
+    _FFMPEG_BIN = found or "ffmpeg"  # 仍给个名字，便于报错时提示
+    return _FFMPEG_BIN
+
+
+def _resolve_ffprobe() -> str:
+    """返回可用的 ffprobe 可执行文件路径"""
+    global _FFPROBE_BIN
+    if _FFPROBE_BIN is not None:
+        return _FFPROBE_BIN
+    found = shutil.which("ffprobe")
+    if not found and _HAS_IMAGEIO_FFMPEG:
+        # imageio-ffmpeg 不附带 ffprobe，但同目录通常会有，尝试查找
+        try:
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            candidate = str(Path(ffmpeg_exe).parent / "ffprobe")
+            if Path(candidate).exists():
+                found = candidate
+        except Exception:
+            found = None
+    _FFPROBE_BIN = found or "ffprobe"
+    return _FFPROBE_BIN
+
+
+def ensure_ffmpeg() -> bool:
+    """启动自检：至少 ffmpeg 必须可用，否则打印友好提示并返回 False"""
+    exe = _resolve_ffmpeg()
+    if exe == "ffmpeg" or not Path(exe).exists():
+        print("\n❌ 未检测到 ffmpeg。")
+        if _HAS_IMAGEIO_FFMPEG:
+            print("   已安装 imageio-ffmpeg，但未能定位二进制，请检查安装。")
+        else:
+            print("   请安装 ffmpeg 后重试：")
+            print("     macOS : brew install ffmpeg")
+            print("     Linux : sudo apt install ffmpeg  (Debian/Ubuntu)")
+            print("             sudo dnf install ffmpeg  (Fedora)")
+            print("     Win   : scoop install ffmpeg   或   choco install ffmpeg")
+            print("   或者执行: pip install imageio-ffmpeg  （自动下载静态二进制）\n")
+        return False
+    return True
+
+
+def get_ffmpeg() -> str:
+    return _resolve_ffmpeg()
+
+
+def get_ffprobe() -> str:
+    return _resolve_ffprobe()
+
+
+ALLOWED_EXT = {
+    "mp4", "mov", "avi", "mkv", "flv", "wmv", "webm", "m4v",
+    "mp3", "wav", "aac", "m4a", "flac", "ogg",
+}
+
+
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
+
+
+def ffprobe(path: str) -> dict:
+    """获取媒体文件信息"""
+    cmd = [
+        get_ffprobe(), "-v", "quiet", "-print_format", "json",
+        "-show_format", "-show_streams", path,
+    ]
+    try:
+        out = subprocess.check_output(cmd, timeout=60)
+        return json.loads(out.decode("utf-8"))
+    except Exception:
+        return {}
+
+
+def human_size(n):
+    if n is None:
+        return "0 B"
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if n < 1024:
+            return f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} PB"
+
+
+def _pretty_format_name(raw: str) -> str:
+    """把 'mov,mp4,m4a,3gp,3g2,mj2' 这类长串格式化为更易读的主格式"""
+    if not raw:
+        return ""
+    parts = [p.strip() for p in raw.split(",")]
+    # 取前 2-3 个常见项
+    seen = []
+    for p in parts:
+        if p not in seen:
+            seen.append(p)
+        if len(seen) >= 3:
+            break
+    # 常见映射
+    name_map = {
+        "mov,mp4,m4a,3gp,3g2,mj2": "MP4 / MOV",
+        "matroska,webm": "MKV / WEBM",
+        "avi": "AVI",
+        "flv": "FLV",
+        "wmv": "WMV",
+        "mp3": "MP3",
+        "wav": "WAV",
+        "ogg": "OGG",
+        "flac": "FLAC",
+        "aac": "AAC",
+    }
+    return name_map.get(raw, ", ".join(seen).upper())
+
+
+def get_media_meta(path: str) -> dict:
+    info = ffprobe(path)
+    fmt = info.get("format", {})
+    duration = float(fmt.get("duration", 0) or 0)
+    size = int(fmt.get("size", 0) or 0)
+    video_stream = next(
+        (s for s in info.get("streams", []) if s.get("codec_type") == "video"),
+        None,
+    )
+    audio_stream = next(
+        (s for s in info.get("streams", []) if s.get("codec_type") == "audio"),
+        None,
+    )
+    meta = {
+        "duration": round(duration, 2),
+        "size": size,
+        "size_human": human_size(size),
+        "format_name": _pretty_format_name(fmt.get("format_name", "")),
+        "has_video": video_stream is not None,
+        "has_audio": audio_stream is not None,
+    }
+    if video_stream:
+        meta["width"] = video_stream.get("width")
+        meta["height"] = video_stream.get("height")
+        meta["video_codec"] = video_stream.get("codec_name")
+        fr = video_stream.get("avg_frame_rate", "0/1")
+        try:
+            a, b = fr.split("/")
+            meta["fps"] = round(float(a) / float(b), 2) if float(b) else 0
+        except Exception:
+            meta["fps"] = 0
+    if audio_stream:
+        meta["audio_codec"] = audio_stream.get("codec_name")
+    return meta
+
+
+def get_ffmpeg_version() -> str:
+    try:
+        out = subprocess.check_output([get_ffmpeg(), "-version"], timeout=10)
+        first = out.decode("utf-8", errors="ignore").splitlines()[0]
+        return first.strip()
+    except Exception:
+        return "未检测到 ffmpeg"
+
+
+def run_ffmpeg(args, task_id, workdir):
+    """执行 ffmpeg，将进度写入任务"""
+    task = TASKS.get(task_id)
+    cmd = [get_ffmpeg(), "-y", "-hide_banner", "-progress", "pipe:1"] + args
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=str(workdir),
+            text=True,
+            bufsize=1,
+        )
+    except Exception as e:
+        task["status"] = "failed"
+        task["error"] = str(e)
+        save_tasks()
+        return
+
+    duration = task.get("duration", 0) or 0
+    out_lines = []
+    progress = {"out_time_ms": 0, "speed": 0}
+    for line in proc.stdout:
+        line = line.strip()
+        if "=" in line:
+            k, _, v = line.partition("=")
+            progress[k.strip()] = v.strip()
+        out_lines.append(line)
+        if duration > 0:
+            try:
+                ms = int(progress.get("out_time_ms", 0) or 0)
+                pct = min(100, (ms / 1_000_000) / duration * 100)
+                task["progress"] = round(pct, 1)
+            except Exception:
+                pass
+        else:
+            task["progress"] = None
+        save_tasks()
+
+    proc.wait()
+    if proc.returncode == 0:
+        task["status"] = "finished"
+        task["progress"] = 100
+    else:
+        task["status"] = "failed"
+        task["error"] = "\n".join(out_lines[-30:])[:2000]
+    save_tasks()
+
+
+def _generate_gif_clips(src, segments, fps, width, base, task_id, duration):
+    """逐片段生成调色板优化的 GIF（后台线程）"""
+    task = TASKS.get(task_id)
+    total = len(segments)
+    try:
+        for i, (start, end) in enumerate(segments):
+            pal = base / f"pal_{i+1}.png"
+            ss = ["-ss", fmt_dur(start)]
+            if end is not None:
+                ss += ["-to", fmt_dur(end)]
+            vf_scale = f"fps={fps},scale={width}:-1:flags=lanczos"
+            # 注意: -ss/-to 必须放在 -i 之前(input seeking), 否则 palettegen
+            # 在 output seeking 下会丢帧导致空输出(exit 254)
+            p1 = [get_ffmpeg(), "-y", "-hide_banner", "-loglevel", "error"] + ss + [
+                "-i", src, "-vf", f"{vf_scale},palettegen", str(pal)]
+            p2 = [get_ffmpeg(), "-y", "-hide_banner", "-loglevel", "error"] + ss + [
+                "-i", src, "-i", str(pal),
+                "-lavfi", f"{vf_scale}[x];[x][1:v]paletteuse",
+                str(base / f"clip_{i+1:03d}.gif")]
+            subprocess.run(p1, timeout=120, check=True)
+            subprocess.run(p2, timeout=120, check=True)
+            if pal.exists():
+                pal.unlink()
+            if task and duration:
+                task["progress"] = round((i + 1) / total * 100, 1)
+                save_tasks()
+        if task:
+            task["status"] = "finished"
+            task["progress"] = 100
+            save_tasks()
+    except Exception as e:
+        if task:
+            task["status"] = "failed"
+            task["error"] = str(e)[:2000]
+            save_tasks()
+
+
+# ---------------- API ----------------
+
+@app.route("/api/version")
+def api_version():
+    return jsonify({"ffmpeg": get_ffmpeg_version()})
+
+
+@app.route("/api/upload", methods=["POST"])
+def api_upload():
+    if "file" not in request.files:
+        return jsonify({"error": "未找到文件"}), 400
+    f = request.files["file"]
+    if f.filename == "":
+        return jsonify({"error": "文件名为空"}), 400
+    if not allowed_file(f.filename):
+        return jsonify({"error": "不支持的文件类型"}), 400
+    filename = secure_filename(f.filename)
+    # 避免重名
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix
+    target = UPLOAD_DIR / filename
+    i = 1
+    while target.exists():
+        target = UPLOAD_DIR / f"{stem}_{i}{suffix}"
+        i += 1
+    f.save(str(target))
+    meta = get_media_meta(str(target))
+    file_id = target.name
+    return jsonify({
+        "file_id": file_id,
+        "filename": target.name,
+        "meta": meta,
+    })
+
+
+def _is_ignored_file(name: str) -> bool:
+    """跳过版本控制占位文件和隐藏文件"""
+    if name.startswith("."):
+        return True
+    if name.lower() in {".gitkeep", ".gitignore", ".ds_store"}:
+        return True
+    return False
+
+
+@app.route("/api/files")
+def api_files():
+    files = []
+    for p in sorted(UPLOAD_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if p.is_file() and not _is_ignored_file(p.name):
+            try:
+                meta = get_media_meta(str(p))
+            except Exception:
+                meta = {}
+            files.append({
+                "file_id": p.name,
+                "filename": p.name,
+                "size": p.stat().st_size,
+                "size_human": human_size(p.stat().st_size),
+                "meta": meta,
+            })
+    return jsonify({"files": files})
+
+
+@app.route("/api/file/<file_id>")
+def api_file_info(file_id):
+    p = UPLOAD_DIR / secure_filename(file_id)
+    if not p.exists():
+        abort(404)
+    meta = get_media_meta(str(p))
+    return jsonify({"file_id": p.name, "filename": p.name, "meta": meta})
+
+
+@app.route("/api/thumbnail/<file_id>")
+def api_thumbnail(file_id):
+    """生成并返回视频首帧缩略图"""
+    p = UPLOAD_DIR / secure_filename(file_id)
+    if not p.exists():
+        abort(404)
+    thumb = OUTPUT_DIR / f"thumb_{p.stem}.jpg"
+    if not thumb.exists():
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(p), "-ss", "00:00:01", "-vframes", "1",
+            "-vf", "scale=320:-1", str(thumb),
+        ]
+        try:
+            subprocess.run(cmd, timeout=30, check=False)
+        except Exception:
+            pass
+    if thumb.exists():
+        return send_file(str(thumb), mimetype="image/jpeg")
+    abort(404)
+
+
+def start_task(task_id, args, duration, workdir):
+    import threading
+    t = threading.Thread(
+        target=run_ffmpeg, args=(args, task_id, workdir), daemon=True
+    )
+    t.start()
+
+
+def new_task(name, duration=0, output_name=None):
+    task_id = uuid.uuid4().hex[:12]
+    TASKS[task_id] = {
+        "task_id": task_id,
+        "name": name,
+        "status": "running",
+        "progress": 0 if duration else None,
+        "duration": duration,
+        "created_at": int(time.time()),
+        "output_name": output_name,
+        "error": None,
+    }
+    save_tasks()
+    return task_id
+
+
+def parse_time_to_seconds(value):
+    """将 HH:MM:SS、MM:SS 或纯秒数解析为秒；非法返回 None"""
+    if value is None:
+        return None
+    value = str(value).strip()
+    if value == "":
+        return None
+    # 纯数字（支持小数）
+    if re.fullmatch(r"\d+(\.\d+)?", value):
+        return float(value)
+    # HH:MM:SS 或 MM:SS
+    m = re.fullmatch(r"(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)", value)
+    if m:
+        h = int(m.group(1) or 0)
+        mm = int(m.group(2))
+        ss = float(m.group(3))
+        return h * 3600 + mm * 60 + ss
+    return None
+
+
+def validate_segments(segments, duration):
+    """校验多个片段，返回 (clean_segments, error)。clean_segments 为 [(start,end), ...]"""
+    if not segments:
+        return [], "请至少添加一个片段"
+    clean = []
+    for i, seg in enumerate(segments):
+        start = parse_time_to_seconds(seg.get("start"))
+        end = parse_time_to_seconds(seg.get("end"))
+        if start is None:
+            return [], f"第 {i+1} 个片段：开始时间格式不正确"
+        if start < 0:
+            return [], f"第 {i+1} 个片段：开始时间不能为负"
+        if end is not None:
+            if end <= start:
+                return [], f"第 {i+1} 个片段：结束时间需大于开始时间"
+            if duration and end > duration + 1:
+                return [], f"第 {i+1} 个片段：结束时间超过视频总时长 {fmt_dur(duration)}"
+        if duration and start > duration + 1:
+            return [], f"第 {i+1} 个片段：开始时间超过视频总时长 {fmt_dur(duration)}"
+        clean.append((start, end))
+    return clean, None
+
+
+def fmt_dur(s):
+    s = int(s)
+    h = s // 3600
+    m = (s % 3600) // 60
+    sec = s % 60
+    return f"{h:02d}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
+
+
+# 各功能接口 -------------------------------------------------
+
+@app.route("/api/split", methods=["POST"])
+def api_split():
+    data = request.json
+    file_id = secure_filename(data["file_id"])
+    src = UPLOAD_DIR / file_id
+    if not src.exists():
+        return jsonify({"error": "源文件不存在"}), 404
+    mode = data.get("mode", "segment")  # segment | time
+    mute = bool(data.get("mute", False))
+    meta = get_media_meta(str(src))
+    out_paths = []
+    args_list = []
+    if mode == "segment":
+        seg = float(data.get("segment", 60))
+        if seg <= 0:
+            return jsonify({"error": "每段时长需大于0"}), 400
+        # 按固定时长拆分，输出为多个文件
+        base = OUTPUT_DIR / f"split_{src.stem}"
+        base.mkdir(exist_ok=True)
+        args = ["-i", str(src), "-f", "segment",
+                "-segment_time", str(seg), "-reset_timestamps", "1",
+                "-c", "copy"]
+        if mute:
+            args += ["-an"]
+        args += [str(base / f"{src.stem}_%03d{src.suffix}")]
+        task_id = new_task(f"按时长拆分 {src.name} ({seg}s){' · 静音' if mute else ''}",
+                           duration=meta.get("duration", 0))
+        TASKS[task_id]["output_dir"] = str(base)
+        save_tasks()
+        start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+        return jsonify({"task_id": task_id})
+    else:
+        # 按指定时间截取一个或多个片段
+        duration = meta.get("duration", 0) or 0
+        output = data.get("output", "video")  # video | gif
+        raw_segments = data.get("segments")
+        # 兼容旧版单片段传参
+        if not raw_segments:
+            start = data.get("start", "00:00:00")
+            end = data.get("end", "")
+            raw_segments = [{"start": start, "end": end}]
+
+        clean, err = validate_segments(raw_segments, duration)
+        if err:
+            return jsonify({"error": err}), 400
+
+        # GIF 输出: 单片段/多片段都打包到目录(使用调色板优化画质)
+        if output == "gif":
+            gif_fps = float(data.get("gif_fps", 12))
+            gif_width = int(data.get("gif_width", 480))
+            base = OUTPUT_DIR / f"clips_{src.stem}_{int(time.time())}"
+            base.mkdir(exist_ok=True)
+            count = len(clean)
+            task_id = new_task(f"截取 {count} 个片段 → GIF {gif_width}px", duration=duration)
+            TASKS[task_id]["output_dir"] = str(base)
+            save_tasks()
+            import threading
+            t = threading.Thread(
+                target=_generate_gif_clips,
+                args=(str(src), clean, gif_fps, gif_width, base, task_id, duration),
+                daemon=True,
+            )
+            t.start()
+            return jsonify({"task_id": task_id})
+
+        # 多个片段用单次调用、stream copy 输出多个文件
+        count = len(clean)
+        if count == 1:
+            start, end = clean[0]
+            out = OUTPUT_DIR / f"clip_{src.stem}_{int(time.time())}{src.suffix}"
+            args = ["-i", str(src), "-ss", fmt_dur(start)]
+            if end is not None:
+                args += ["-to", fmt_dur(end)]
+            args += ["-c", "copy"]
+            if mute:
+                args += ["-an"]
+            args += [str(out)]
+            task_id = new_task(f"截取片段 {src.name} [{fmt_dur(start)}~{fmt_dur(end) if end is not None else '结尾'}]{' · 静音' if mute else ''}",
+                               duration=duration)
+            TASKS[task_id]["output_name"] = out.name
+            save_tasks()
+            start_task(task_id, args, duration, OUTPUT_DIR)
+            return jsonify({"task_id": task_id})
+        else:
+            base = OUTPUT_DIR / f"clips_{src.stem}_{int(time.time())}"
+            base.mkdir(exist_ok=True)
+            args = ["-i", str(src)]
+            for i, (start, end) in enumerate(clean):
+                args += ["-ss", fmt_dur(start)]
+                if end is not None:
+                    args += ["-to", fmt_dur(end)]
+                if mute:
+                    args += ["-map", "0:v", "-c", "copy"]
+                else:
+                    args += ["-map", "0", "-c", "copy"]
+                args += [str(base / f"clip_{i+1:03d}{src.suffix}")]
+            task_id = new_task(f"截取 {count} 个片段 {src.name}{' · 静音' if mute else ''}", duration=duration)
+            TASKS[task_id]["output_dir"] = str(base)
+            save_tasks()
+            start_task(task_id, args, duration, OUTPUT_DIR)
+            return jsonify({"task_id": task_id})
+
+
+@app.route("/api/screenshot", methods=["POST"])
+def api_screenshot():
+    data = request.json
+    file_id = secure_filename(data["file_id"])
+    src = UPLOAD_DIR / file_id
+    if not src.exists():
+        return jsonify({"error": "源文件不存在"}), 404
+    mode = data.get("mode", "single")  # single | every
+    meta = get_media_meta(str(src))
+    if mode == "single":
+        time_pos = data.get("time", "00:00:01")
+        fmt = data.get("format", "jpg")
+        out = OUTPUT_DIR / f"shot_{src.stem}_{int(time.time())}.{fmt}"
+        args = ["-i", str(src), "-ss", str(time_pos), "-vframes", "1"]
+        vf = data.get("vf")
+        if vf:
+            args += ["-vf", vf]
+        args += [str(out)]
+        task_id = new_task(f"截图 @ {time_pos}", duration=meta.get("duration", 0))
+        TASKS[task_id]["output_name"] = out.name
+        save_tasks()
+        start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+        return jsonify({"task_id": task_id})
+    else:
+        interval = float(data.get("interval", 1))
+        if interval <= 0:
+            return jsonify({"error": "间隔需大于0"}), 400
+        fmt = data.get("format", "jpg")
+        base = OUTPUT_DIR / f"shots_{src.stem}_{int(time.time())}"
+        base.mkdir(exist_ok=True)
+        args = ["-i", str(src), "-vf",
+                f"fps=1/{interval}", str(base / f"shot_%05d.{fmt}")]
+        task_id = new_task(f"每 {interval}s 截图", duration=meta.get("duration", 0))
+        TASKS[task_id]["output_dir"] = str(base)
+        save_tasks()
+        start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+        return jsonify({"task_id": task_id})
+
+
+@app.route("/api/convert", methods=["POST"])
+def api_convert():
+    data = request.json
+    file_id = secure_filename(data["file_id"])
+    src = UPLOAD_DIR / file_id
+    if not src.exists():
+        return jsonify({"error": "源文件不存在"}), 404
+    target = data.get("target", "mp4")
+    meta = get_media_meta(str(src))
+    out = OUTPUT_DIR / f"conv_{src.stem}_{int(time.time())}.{target}"
+    crf = data.get("crf")
+    # 需要强制重编码的容器/格式
+    force_reencode = target in ("gif", "webm")
+    if crf:
+        force_reencode = True
+
+    if target == "gif":
+        # GIF 无音频，且必须重编码为 gif 编码器
+        args = ["-i", str(src), "-vf", "fps=10,scale=-1:-1", "-loop", "0", str(out)]
+        task_id = new_task(f"格式转换 → {target}", duration=meta.get("duration", 0))
+        TASKS[task_id]["output_name"] = out.name
+        save_tasks()
+        start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+        return jsonify({"task_id": task_id})
+
+    if force_reencode:
+        args = ["-i", str(src), "-c:v", "libx264", "-crf", str(crf or 23)]
+        if target in ("mp4", "mov", "m4v"):
+            args += ["-c:a", "aac", "-b:a", "128k"]
+        elif target in ("webm",):
+            args = ["-i", str(src), "-c:v", "libvpx-vp9", "-crf", str(crf or 30),
+                    "-b:v", "0", "-c:a", "libopus"]
+        else:
+            args += ["-c:a", "copy"]
+        args += [str(out)]
+        task_id = new_task(f"格式转换 → {target}", duration=meta.get("duration", 0))
+        TASKS[task_id]["output_name"] = out.name
+        save_tasks()
+        start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+        return jsonify({"task_id": task_id})
+
+    args = ["-i", str(src)]
+    vcodec = data.get("vcodec", "copy")
+    if vcodec and vcodec != "copy":
+        args += ["-c:v", vcodec]
+    else:
+        args += ["-c:v", "copy"]
+    # 某些容器(如 mp4)对 copy 音频可能不支持, 默认 aac
+    if target in ("mp4", "mov", "m4v") and meta.get("audio_codec") not in ("aac", "mp3"):
+        args += ["-c:a", "aac", "-b:a", "128k"]
+    else:
+        args += ["-c:a", "copy"]
+    args += [str(out)]
+    task_id = new_task(f"格式转换 → {target}", duration=meta.get("duration", 0))
+    TASKS[task_id]["output_name"] = out.name
+    save_tasks()
+    start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+    return jsonify({"task_id": task_id})
+
+
+@app.route("/api/compress", methods=["POST"])
+def api_compress():
+    data = request.json
+    file_id = secure_filename(data["file_id"])
+    src = UPLOAD_DIR / file_id
+    if not src.exists():
+        return jsonify({"error": "源文件不存在"}), 404
+    meta = get_media_meta(str(src))
+    preset = data.get("preset", "medium")
+    crf = data.get("crf", 23)
+    scale = data.get("scale", "original")  # original | 1080 | 720 | 480
+    out = OUTPUT_DIR / f"comp_{src.stem}_{int(time.time())}.mp4"
+    args = ["-i", str(src), "-c:v", "libx264", "-preset", preset,
+            "-crf", str(crf)]
+    if scale != "original":
+        args += ["-vf", f"scale=-2:{scale}"]
+    args += ["-c:a", "aac", "-b:a", "128k", str(out)]
+    task_id = new_task(f"压缩 (CRF {crf})", duration=meta.get("duration", 0))
+    TASKS[task_id]["output_name"] = out.name
+    save_tasks()
+    start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+    return jsonify({"task_id": task_id})
+
+
+@app.route("/api/crop", methods=["POST"])
+def api_crop():
+    data = request.json
+    file_id = secure_filename(data["file_id"])
+    src = UPLOAD_DIR / file_id
+    if not src.exists():
+        return jsonify({"error": "源文件不存在"}), 404
+    meta = get_media_meta(str(src))
+    x = data.get("x", 0)
+    y = data.get("y", 0)
+    w = data.get("w") or meta.get("width")
+    h = data.get("h") or meta.get("height")
+    out = OUTPUT_DIR / f"crop_{src.stem}_{int(time.time())}{src.suffix}"
+    vf = f"crop={w}:{h}:{x}:{y}"
+    args = ["-i", str(src), "-vf", vf, "-c:a", "copy", str(out)]
+    task_id = new_task(f"裁剪 {w}x{h}", duration=meta.get("duration", 0))
+    TASKS[task_id]["output_name"] = out.name
+    save_tasks()
+    start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+    return jsonify({"task_id": task_id})
+
+
+# ---------------- 合并拼接 ----------------
+@app.route("/api/merge", methods=["POST"])
+def api_merge():
+    data = request.json
+    file_ids = [secure_filename(f) for f in data.get("file_ids", [])]
+    if len(file_ids) < 2:
+        return jsonify({"error": "请至少选择 2 个文件进行合并"}), 400
+    paths = [UPLOAD_DIR / f for f in file_ids]
+    for p in paths:
+        if not p.exists():
+            return jsonify({"error": f"文件不存在: {p.name}"}), 404
+    # 生成 concat 列表文件
+    list_file = OUTPUT_DIR / f"merge_list_{int(time.time())}.txt"
+    list_file.write_text(
+        "\n".join(f"file '{p.resolve()}'" for p in paths), encoding="utf-8"
+    )
+    suffix = Path(file_ids[0]).suffix or ".mp4"
+    out = OUTPUT_DIR / f"merge_{int(time.time())}{suffix}"
+    # 统一编码避免拼接黑屏/音画不同步: 重编码为 h264+aac
+    args = ["-f", "concat", "-safe", "0", "-i", str(list_file),
+            "-c:v", "libx264", "-c:a", "aac", "-b:a", "128k", str(out)]
+    duration = sum(get_media_meta(str(p)).get("duration", 0) for p in paths)
+    task_id = new_task(f"合并 {len(file_ids)} 个文件", duration=duration)
+    TASKS[task_id]["output_name"] = out.name
+    save_tasks()
+    start_task(task_id, args, duration, OUTPUT_DIR)
+    return jsonify({"task_id": task_id})
+
+
+# ---------------- 旋转 / 翻转 ----------------
+@app.route("/api/rotate", methods=["POST"])
+def api_rotate():
+    data = request.json
+    file_id = secure_filename(data["file_id"])
+    src = UPLOAD_DIR / file_id
+    if not src.exists():
+        return jsonify({"error": "源文件不存在"}), 404
+    meta = get_media_meta(str(src))
+    rot = int(data.get("rotation", 0))  # 0 90 180 270
+    flip_h = bool(data.get("flip_h", False))
+    flip_v = bool(data.get("flip_v", False))
+    # 转置矩阵: transpose 需要配rotation
+    vf_parts = []
+    # ffmpeg transpose: 0=90CW, 1=90CCW, 2=90CW+flipV, 3=90CCW+flipV
+    if rot == 90:
+        vf_parts.append("transpose=1")
+    elif rot == 180:
+        vf_parts.append("transpose=1,transpose=1")
+    elif rot == 270:
+        vf_parts.append("transpose=2")
+    if flip_h:
+        vf_parts.append("hflip")
+    if flip_v:
+        vf_parts.append("vflip")
+    if not vf_parts:
+        return jsonify({"error": "请选择旋转或翻转操作"}), 400
+    out = OUTPUT_DIR / f"rot_{src.stem}_{int(time.time())}{src.suffix}"
+    vf = ",".join(vf_parts)
+    args = ["-i", str(src), "-vf", vf, "-c:a", "copy", str(out)]
+    task_id = new_task(f"旋转 {rot}°" + ("+翻转" if (flip_h or flip_v) else ""),
+                       duration=meta.get("duration", 0))
+    TASKS[task_id]["output_name"] = out.name
+    save_tasks()
+    start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+    return jsonify({"task_id": task_id})
+
+
+# ---------------- 加水印 ----------------
+@app.route("/api/watermark", methods=["POST"])
+def api_watermark():
+    data = request.json
+    file_id = secure_filename(data["file_id"])
+    src = UPLOAD_DIR / file_id
+    if not src.exists():
+        return jsonify({"error": "源文件不存在"}), 404
+    meta = get_media_meta(str(src))
+    wm_type = data.get("type", "text")  # text | image
+    pos = data.get("position", "br")    # tl tr bl br c
+    margin = int(data.get("margin", 20))
+    # 位置映射为 overlay 表达式
+    pos_map = {
+        "tl": f"{margin}:{margin}",
+        "tr": f"W-w-{margin}:{margin}",
+        "bl": f"{margin}:H-h-{margin}",
+        "br": f"W-w-{margin}:H-h-{margin}",
+        "c": "(W-w)/2:(H-h)/2",
+    }
+    out = OUTPUT_DIR / f"wm_{src.stem}_{int(time.time())}{src.suffix}"
+    if wm_type == "text":
+        text = data.get("text", "Watermark")
+        fontsize = int(data.get("fontsize", 36))
+        color = data.get("color", "white")
+        alpha = float(data.get("alpha", 0.7))
+        # 转义单引号
+        text = text.replace("'", "'\\''")
+        # drawtext 内部的 x/y 坐标中的 ':' 在 filtergraph 中必须转义为 '\:'
+        # 注意：先按裸 ':' 拆分 x/y，再各自转义，避免把已转义的 '\:' 误判为分隔符
+        x_expr, _, y_expr = pos_map.get(pos, pos_map["br"]).partition(":")
+        x_expr = x_expr.replace(":", r"\:")
+        y_expr = y_expr.replace(":", r"\:")
+        draw = (f"drawtext=text='{text}':fontsize={fontsize}"
+                f":fontcolor={color}@{alpha}:x={x_expr}:y={y_expr}")
+        args = ["-i", str(src), "-vf", draw, "-c:a", "copy", str(out)]
+        task_id = new_task(f"文字水印: {text[:12]}", duration=meta.get("duration", 0))
+    else:
+        wm_file = request.files.get("watermark") if False else None
+        # 图片水印通过单独上传接口
+        wm_id = data.get("watermark_id")
+        if not wm_id:
+            return jsonify({"error": "请先上传水印图片"}), 400
+        wmp = UPLOAD_DIR / secure_filename(wm_id)
+        if not wmp.exists():
+            return jsonify({"error": "水印图片不存在"}), 404
+        scale_w = data.get("scale_w")
+        # 图片作为第二个输入流 [1:v], 用 filter_complex 叠加
+        # scale_w 需为 >0 的整数；空字符串 / "0" / 非法值时回退为不缩放，
+        # 否则 scale=0:-1 会触发 "Picture size 0x0 is invalid"
+        if scale_w:
+            try:
+                sw = int(scale_w)
+            except (TypeError, ValueError):
+                sw = 0
+            if sw > 0:
+                filt = (f"[1:v]scale={sw}:-1[wm];"
+                        f"[0:v][wm]overlay={overlay}")
+            else:
+                filt = f"[0:v][1:v]overlay={overlay}"
+        else:
+            filt = f"[0:v][1:v]overlay={overlay}"
+        args = ["-i", str(src), "-i", str(wmp), "-filter_complex",
+                filt, "-c:a", "copy", str(out)]
+        task_id = new_task(f"图片水印", duration=meta.get("duration", 0))
+    TASKS[task_id]["output_name"] = out.name
+    save_tasks()
+    start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+    return jsonify({"task_id": task_id})
+
+
+# 水印图片上传（复用 uploads 目录）
+@app.route("/api/upload_watermark", methods=["POST"])
+def api_upload_watermark():
+    if "file" not in request.files:
+        return jsonify({"error": "未找到文件"}), 400
+    f = request.files["file"]
+    if f.filename == "":
+        return jsonify({"error": "文件名为空"}), 400
+    filename = secure_filename(f.filename)
+    target = UPLOAD_DIR / filename
+    i = 1
+    while target.exists():
+        target = UPLOAD_DIR / f"{Path(filename).stem}_{i}{Path(filename).suffix}"
+        i += 1
+    f.save(str(target))
+    return jsonify({"watermark_id": target.name, "filename": target.name})
+
+
+# ---------------- 调速 / 倒放 ----------------
+@app.route("/api/speed", methods=["POST"])
+def api_speed():
+    data = request.json
+    file_id = secure_filename(data["file_id"])
+    src = UPLOAD_DIR / file_id
+    if not src.exists():
+        return jsonify({"error": "源文件不存在"}), 404
+    meta = get_media_meta(str(src))
+    speed = float(data.get("speed", 1.0))
+    if speed <= 0:
+        return jsonify({"error": "速度需大于 0"}), 400
+    reverse = bool(data.get("reverse", False))
+    out = OUTPUT_DIR / f"speed_{src.stem}_{int(time.time())}{src.suffix}"
+    # setpts 控制视频速度，atempo 控制音频速度（最大2x，可链式）
+    pts = 1.0 / speed
+    vf = f"setpts={pts:.4f}*PTS"
+    # atempo 链
+    atempo = speed
+    chain = []
+    while atempo > 2.0:
+        chain.append(2.0)
+        atempo /= 2.0
+    while atempo < 0.5:
+        chain.append(0.5)
+        atempo *= 2.0
+    chain.append(round(atempo, 4))
+    af = "atempo=" + ",atempo=".join(str(c) for c in chain)
+    if reverse:
+        af = "areverse," + af
+        vf = "reverse," + vf
+    args = ["-i", str(src), "-vf", vf, "-af", af, str(out)]
+    task_id = new_task(f"调速 {speed}x" + (" · 倒放" if reverse else ""),
+                       duration=meta.get("duration", 0) / speed)
+    TASKS[task_id]["output_name"] = out.name
+    save_tasks()
+    start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+    return jsonify({"task_id": task_id})
+
+
+@app.route("/api/tasks")
+def api_tasks():
+    tasks = sorted(TASKS.values(), key=lambda t: t.get("created_at", 0), reverse=True)
+    return jsonify({"tasks": tasks})
+
+
+@app.route("/api/task/<task_id>")
+def api_task(task_id):
+    task = TASKS.get(task_id)
+    if not task:
+        abort(404)
+    return jsonify(task)
+
+
+@app.route("/api/download/<file_id>")
+def api_download(file_id):
+    # file_id 可以是 outputs 下的文件名
+    p = OUTPUT_DIR
+    target = p / secure_filename(file_id)
+    if not target.exists():
+        abort(404)
+    return send_file(str(target), as_attachment=True)
+
+
+@app.route("/api/download_dir/<task_id>")
+def api_download_dir(task_id):
+    """将某个任务输出的目录打包为 zip 下载"""
+    import zipfile
+    task = TASKS.get(task_id)
+    if not task or not task.get("output_dir"):
+        abort(404)
+    d = Path(task["output_dir"])
+    if not d.exists():
+        abort(404)
+    zip_path = OUTPUT_DIR / f"{task_id}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in d.rglob("*"):
+            if f.is_file():
+                zf.write(f, f.relative_to(d))
+    return send_file(str(zip_path), as_attachment=True)
+
+
+@app.route("/api/delete_upload/<file_id>", methods=["POST"])
+def api_delete_upload(file_id):
+    p = UPLOAD_DIR / secure_filename(file_id)
+    if p.exists():
+        p.unlink()
+    return jsonify({"ok": True})
+
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_static(path):
+    full = STATIC_DIR / path
+    if path and full.exists() and full.is_file():
+        return send_from_directory(str(STATIC_DIR), path)
+    return send_from_directory(str(STATIC_DIR), "index.html")
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    if not ensure_ffmpeg():
+        # 启动自检失败：给出安装指引后退出（非 0 退出码便于 start.sh 感知）
+        raise SystemExit(1)
+    print(f"ClipBench 已启动: http://127.0.0.1:{port}")
+    if _HAS_IMAGEIO_FFMPEG and _FFMPEG_BIN and "imageio" in _FFMPEG_BIN:
+        print("ffmpeg: 使用 imageio-ffmpeg 提供的静态二进制（无需本地安装）")
+    else:
+        print(f"ffmpeg: {get_ffmpeg_version()}")
+    app.run(host="127.0.0.1", port=port, debug=False)

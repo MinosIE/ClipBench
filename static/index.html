@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClipBench</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🎬</span>
+      <div>
+        <h1>ClipBench</h1>
+        <p class="sub">基于本地 ffmpeg · <span id="ffmpeg-version">检测中…</span></p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <label class="btn btn-primary">
+        + 上传文件
+        <input type="file" id="file-input" hidden accept="video/*,audio/*" />
+      </label>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- 左侧：文件列表 -->
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <h2>媒体文件</h2>
+        <button class="btn-ghost" id="refresh-files" title="刷新">⟳</button>
+      </div>
+      <div id="file-list" class="file-list">
+        <p class="empty">还没有文件，点击右上角上传。</p>
+      </div>
+    </aside>
+
+    <!-- 右侧：操作区 -->
+    <section class="content">
+      <div id="no-select" class="placeholder">
+        <div class="placeholder-icon">📂</div>
+        <p>请选择左侧的一个媒体文件开始操作</p>
+      </div>
+
+      <div id="workbench" class="workbench hidden">
+        <div class="media-info card">
+          <img id="media-thumb" class="thumb" alt="缩略图" />
+          <div class="meta">
+            <h3 id="media-name">—</h3>
+            <div id="media-meta" class="meta-grid"></div>
+          </div>
+        </div>
+
+        <nav class="tabs">
+          <button class="tab active" data-tab="split">✂️ 拆分</button>
+          <button class="tab" data-tab="screenshot">📸 截图</button>
+          <button class="tab" data-tab="convert">🔄 格式转换</button>
+          <button class="tab" data-tab="compress">🗜️ 压缩</button>
+          <button class="tab" data-tab="crop">🖼️ 裁剪</button>
+          <button class="tab" data-tab="merge">🔗 合并</button>
+          <button class="tab" data-tab="rotate">🔄 旋转</button>
+          <button class="tab" data-tab="watermark">💧 水印</button>
+          <button class="tab" data-tab="speed">⏩ 调速</button>
+        </nav>
+
+        <div class="tab-panels">
+          <!-- 拆分 -->
+          <div class="panel active" data-panel="split">
+            <div class="form-row">
+              <label><input type="radio" name="split-mode" value="segment" checked /> 按固定时长拆分</label>
+              <label><input type="radio" name="split-mode" value="time" /> 截取指定片段</label>
+            </div>
+            <label class="switch-row">
+              <input type="checkbox" id="split-mute" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-label">静音（移除音频轨）</span>
+            </label>
+            <div id="split-segment" class="form-group">
+              <label>每段时长（秒）</label>
+              <input type="number" id="seg-time" value="60" min="1" />
+              <p class="hint">将视频均匀切割为多个片段。</p>
+            </div>
+            <div id="split-time" class="form-group hidden">
+              <div class="form-row">
+                <label><input type="radio" name="split-out" value="video" checked /> 视频片段</label>
+                <label><input type="radio" name="split-out" value="gif" /> 导出为 GIF</label>
+              </div>
+              <div id="split-gif" class="form-group hidden">
+                <div class="form-row-2">
+                  <div>
+                    <label>帧率 (fps)</label>
+                    <input type="number" id="gif-fps" value="12" min="1" max="30" />
+                  </div>
+                  <div>
+                    <label>宽度 (px)</label>
+                    <input type="number" id="gif-width" value="480" min="50" />
+                  </div>
+                </div>
+                <p class="hint">GIF 自动用调色板优化画质，多片段将打包为 ZIP 下载。</p>
+              </div>
+              <div class="seg-head">
+                <label>片段列表（可添加多个）</label>
+                <button type="button" class="btn btn-sm" id="add-seg">＋ 添加片段</button>
+              </div>
+              <div id="seg-list"></div>
+            </div>
+            <button class="btn btn-primary" data-action="split">开始拆分</button>
+          </div>
+
+          <!-- 截图 -->
+          <div class="panel" data-panel="screenshot">
+            <div class="form-row">
+              <label><input type="radio" name="shot-mode" value="single" checked /> 单张截图</label>
+              <label><input type="radio" name="shot-mode" value="every" /> 定时批量截图</label>
+            </div>
+            <div id="shot-single" class="form-group">
+              <label>时间位置（HH:MM:SS 或秒）</label>
+              <input type="text" id="shot-time" value="00:00:01" />
+            </div>
+            <div id="shot-every" class="form-group hidden">
+              <label>每 N 秒截一张</label>
+              <input type="number" id="shot-interval" value="1" min="0.1" step="0.1" />
+            </div>
+            <div class="form-group">
+              <label>图片格式</label>
+              <select id="shot-format">
+                <option value="jpg">JPG</option>
+                <option value="png">PNG</option>
+                <option value="webp">WEBP</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" data-action="screenshot">开始截图</button>
+          </div>
+
+          <!-- 格式转换 -->
+          <div class="panel" data-panel="convert">
+            <div class="form-group">
+              <label>目标格式</label>
+              <select id="conv-target">
+                <option value="mp4">MP4</option>
+                <option value="mov">MOV</option>
+                <option value="mkv">MKV</option>
+                <option value="avi">AVI</option>
+                <option value="webm">WEBM</option>
+                <option value="mp3">MP3（仅音频）</option>
+                <option value="m4a">M4A（仅音频）</option>
+                <option value="wav">WAV（仅音频）</option>
+                <option value="gif">GIF</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>视频编码</label>
+              <select id="conv-vcodec">
+                <option value="copy">保持原编码 (copy)</option>
+                <option value="libx264">H.264 (libx264)</option>
+                <option value="libx265">H.265 (libx265)</option>
+                <option value="vp9">VP9</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>使用 CRF 质量控制（可选）</label>
+              <input type="number" id="conv-crf" placeholder="18-28，留空则按编码 copy" min="0" max="51" />
+              <p class="hint">数值越小质量越高（通常 23 为默认）。</p>
+            </div>
+            <button class="btn btn-primary" data-action="convert">开始转换</button>
+          </div>
+
+          <!-- 压缩 -->
+          <div class="panel" data-panel="compress">
+            <div class="form-group">
+              <label>压缩质量 (CRF)</label>
+              <input type="range" id="comp-crf" min="18" max="32" value="23" />
+              <span id="comp-crf-val">23</span>
+            </div>
+            <div class="form-group">
+              <label>编码速度</label>
+              <select id="comp-preset">
+                <option value="ultrafast">ultrafast</option>
+                <option value="fast">fast</option>
+                <option value="medium" selected>medium</option>
+                <option value="slow">slow</option>
+                <option value="veryslow">veryslow</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>分辨率上限</label>
+              <select id="comp-scale">
+                <option value="original">保持原分辨率</option>
+                <option value="1080">1080p</option>
+                <option value="720">720p</option>
+                <option value="480">480p</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" data-action="compress">开始压缩</button>
+          </div>
+
+          <!-- 裁剪 -->
+          <div class="panel" data-panel="crop">
+            <div class="form-group">
+              <label>X 起点（像素）</label>
+              <input type="number" id="crop-x" value="0" min="0" />
+            </div>
+            <div class="form-group">
+              <label>Y 起点（像素）</label>
+              <input type="number" id="crop-y" value="0" min="0" />
+            </div>
+            <div class="form-group">
+              <label>裁剪宽度（留空=原宽）</label>
+              <input type="number" id="crop-w" placeholder="自动" min="1" />
+            </div>
+            <div class="form-group">
+              <label>裁剪高度（留空=原高）</label>
+              <input type="number" id="crop-h" placeholder="自动" min="1" />
+            </div>
+            <button class="btn btn-primary" data-action="crop">开始裁剪</button>
+          </div>
+
+          <!-- 合并 -->
+          <div class="panel" data-panel="merge">
+            <div class="form-group">
+              <label>选择要合并的视频（按顺序排列，至少 2 个）</label>
+              <div id="merge-list" class="check-list"></div>
+              <p class="hint">合并会自动统一编码为 H.264 + AAC，避免拼接后出现黑屏或音画不同步。</p>
+            </div>
+            <button class="btn btn-primary" data-action="merge">开始合并</button>
+          </div>
+
+          <!-- 旋转 / 翻转 -->
+          <div class="panel" data-panel="rotate">
+            <div class="form-group">
+              <label>旋转角度</label>
+              <select id="rot-angle">
+                <option value="0">不旋转</option>
+                <option value="90">顺时针 90°</option>
+                <option value="180">180°</option>
+                <option value="270">顺时针 270°</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label><input type="checkbox" id="rot-flip-h" /> 水平翻转</label>
+              <label><input type="checkbox" id="rot-flip-v" /> 垂直翻转</label>
+            </div>
+            <button class="btn btn-primary" data-action="rotate">开始旋转</button>
+          </div>
+
+          <!-- 水印 -->
+          <div class="panel" data-panel="watermark">
+            <div class="form-row">
+              <label><input type="radio" name="wm-type" value="text" checked /> 文字水印</label>
+              <label><input type="radio" name="wm-type" value="image" /> 图片水印</label>
+            </div>
+            <div id="wm-text" class="form-group">
+              <label>水印文字</label>
+              <input type="text" id="wm-text-val" value="© ClipBench" />
+              <div class="form-row-2">
+                <div>
+                  <label>字号</label>
+                  <input type="number" id="wm-fontsize" value="36" min="8" />
+                </div>
+                <div>
+                  <label>颜色</label>
+                  <select id="wm-color">
+                    <option value="white">白色</option>
+                    <option value="black">黑色</option>
+                    <option value="yellow">黄色</option>
+                    <option value="red">红色</option>
+                    <option value="green">绿色</option>
+                  </select>
+                </div>
+              </div>
+              <label>不透明度 (0-1)</label>
+              <input type="number" id="wm-alpha" value="0.7" min="0" max="1" step="0.1" />
+            </div>
+            <div id="wm-image" class="form-group hidden">
+              <label>上传水印图片（PNG 透明最佳）</label>
+              <input type="file" id="wm-image-file" accept="image/*" />
+              <p class="hint" id="wm-image-hint">未选择图片</p>
+              <label>水印宽度（px，留空按原图）</label>
+              <input type="number" id="wm-scale-w" placeholder="自动" min="1" />
+            </div>
+            <div class="form-group">
+              <label>位置</label>
+              <select id="wm-position">
+                <option value="tl">左上</option>
+                <option value="tr">右上</option>
+                <option value="bl">左下</option>
+                <option value="br" selected>右下</option>
+                <option value="c">居中</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>边距 (px)</label>
+              <input type="number" id="wm-margin" value="20" min="0" />
+            </div>
+            <button class="btn btn-primary" data-action="watermark">开始添加水印</button>
+          </div>
+
+          <!-- 调速 -->
+          <div class="panel" data-panel="speed">
+            <div class="form-group">
+              <label>播放速度</label>
+              <input type="range" id="speed-val" min="0.25" max="4" step="0.25" value="1" />
+              <span id="speed-label">1.00x</span>
+              <p class="hint">小于 1 为慢放，大于 1 为快放。支持 0.25x ~ 4x。</p>
+            </div>
+            <div class="form-row">
+              <label><input type="checkbox" id="speed-reverse" /> 倒放</label>
+            </div>
+            <button class="btn btn-primary" data-action="speed">开始调速</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 任务列表 -->
+      <div class="tasks card">
+        <div class="sidebar-head">
+          <h2>任务队列</h2>
+          <button class="btn-ghost" id="refresh-tasks" title="刷新">⟳</button>
+        </div>
+        <div id="task-list" class="task-list">
+          <p class="empty">暂无任务。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 运行时日志
+server.log
+
+# 用户上传与生成产物（大二进制文件）
+uploads/*.mp4
+uploads/*.png
+uploads/*.jpg
+uploads/*.webp
+outputs/
+!outputs/.gitkeep
+
+# 本地任务记录（含本机绝对路径，非敏感但属本地运行数据）
+tasks.json
+
+# 系统文件
+.DS_Store
+*.swp
