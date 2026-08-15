@@ -64,6 +64,7 @@
           <button class="tab" data-tab="rotate">🔄 旋转</button>
           <button class="tab" data-tab="watermark">💧 水印</button>
           <button class="tab" data-tab="speed">⏩ 调速</button>
+          <button class="tab" data-tab="desubtitle">🧹 去字幕</button>
         </nav>
 
         <div class="tab-panels">
@@ -310,6 +311,60 @@
               <label><input type="checkbox" id="speed-reverse" /> 倒放</label>
             </div>
             <button class="btn btn-primary" data-action="speed">开始调速</button>
+          </div>
+
+          <!-- 去字幕 -->
+          <div class="panel" data-panel="desubtitle">
+            <div class="desub-layout">
+              <!-- 左侧：预览与选区 -->
+              <div class="desub-left">
+                <div class="form-group">
+                  <label>预览与选区（拖动选框移动，右下角手柄缩放；默认遮盖底部 1/3）</label>
+                  <div class="desub-stage" id="desub-stage">
+                    <img id="desub-frame" alt="预览帧" />
+                    <div class="desub-box" id="desub-box">
+                      <span class="desub-handle"></span>
+                    </div>
+                    <div class="desub-noselect" id="desub-noselect">请先选择视频文件</div>
+                  </div>
+                  <div class="desub-controls">
+                    <button class="btn btn-sm" id="desub-loadframe" type="button">加载当前帧</button>
+                    <input type="range" id="desub-time" min="0" max="100" step="1" value="10" />
+                    <span id="desub-time-val" class="desub-time-val">0.0s</span>
+                  </div>
+                  <p class="hint">拖动选框移动位置，拖右下角手柄调整大小。坐标自动按原视频分辨率换算。</p>
+                </div>
+              </div>
+              <!-- 右侧：参数与提交 -->
+              <div class="desub-right">
+                <div class="form-group">
+                  <label>擦除方式</label>
+                  <div class="form-row">
+                    <label><input type="radio" name="desub-mode" value="inpaint" checked /> 智能修复</label>
+                    <label><input type="radio" name="desub-mode" value="delogo" /> 边缘修复</label>
+                    <label><input type="radio" name="desub-mode" value="blur" /> 模糊</label>
+                    <label><input type="radio" name="desub-mode" value="mosaic" /> 马赛克</label>
+                  </div>
+                  <p class="hint">边缘修复：用周边像素平滑填充，自然且不突兀（推荐）。智能修复：OpenCV 内容感知重建，更接近无痕（需安装 opencv-python）。模糊/马赛克为强力遮挡。</p>
+                </div>
+                <div class="form-group">
+                  <label id="desub-strength-label">模糊强度 (σ)</label>
+                  <input type="range" id="desub-strength" min="6" max="50" step="1" value="25" />
+                  <span id="desub-strength-val">25</span>
+                </div>
+                <div class="form-group">
+                  <label>字幕区域（像素，可手动微调；留空则用预览选区）</label>
+                  <div class="coord-grid">
+                    <input type="number" id="desub-x" placeholder="X" min="0" />
+                    <input type="number" id="desub-y" placeholder="Y" min="0" />
+                    <input type="number" id="desub-w" placeholder="宽 W" min="2" />
+                    <input type="number" id="desub-h" placeholder="高 H" min="2" />
+                  </div>
+                  <p class="hint">框选后自动填入；若手动修改则以输入框为准（基于原视频分辨率）。</p>
+                </div>
+                <button class="btn btn-primary" data-action="desubtitle">开始去字幕</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -10,6 +10,7 @@ import time
 import uuid
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 from flask import (
@@ -36,9 +37,52 @@ for d in (UPLOAD_DIR, OUTPUT_DIR, STATIC_DIR):
 app = Flask(__name__, static_folder=str(STATIC_DIR))
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024 * 1024  # 4GB
 
+
+@app.after_request
+def _no_cache_static(resp):
+    # 开发期：静态资源禁用缓存，刷新即取最新（避免 JS/CSS 改动不生效）
+    p = request.path
+    if p.endswith(".js") or p.endswith(".css") or p.endswith(".html"):
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+    return resp
+
 # 任务存储: task_id -> task info
 TASKS = {}
 TASKS_FILE = BASE_DIR / "tasks.json"
+
+# 去字幕(inpaint)互斥闸门：同一时刻只跑 1 个，多个串行排队
+# 原因：inpaint 是 CPU 密集型 + 占大量磁盘 IO，并发会互相饿死导致全部卡死
+_INPAINT_SLOTS = 1
+_inpaint_sem = threading.BoundedSemaphore(_INPAINT_SLOTS)
+_inpaint_lock = threading.Lock()
+_inpaint_waiting = 0  # 当前正在等待闸门的任务数（用于 UI 提示）
+
+
+def inpaint_acquire(task_id):
+    """inpaint 任务开始时调用：拿不到闸门就排队阻塞，并更新任务文案展示"排队中"。"""
+    global _inpaint_waiting
+    with _inpaint_lock:
+        _inpaint_waiting += 1
+    if _inpaint_waiting > 1:
+        try:
+            t = TASKS.get(task_id)
+            if t:
+                t["status"] = "queued"
+                save_tasks()
+        except Exception:
+            pass
+    with _inpaint_lock:
+        _inpaint_waiting = max(0, _inpaint_waiting - 1)
+    _inpaint_sem.acquire()
+
+
+def inpaint_release():
+    try:
+        _inpaint_sem.release()
+    except Exception:
+        pass
 
 
 def load_tasks():
@@ -284,6 +328,7 @@ def run_ffmpeg(args, task_id, workdir):
     else:
         task["status"] = "failed"
         task["error"] = "\n".join(out_lines[-30:])[:2000]
+    task["elapsed"] = int(time.time() - (task.get("created_at") or time.time()))
     save_tasks()
 
 
@@ -418,12 +463,111 @@ def api_thumbnail(file_id):
     abort(404)
 
 
+@app.route("/api/frame/<file_id>")
+def api_frame(file_id):
+    """返回视频在指定时间点的原始分辨率帧（JPEG），用于去字幕选区预览"""
+    p = UPLOAD_DIR / secure_filename(file_id)
+    if not p.exists():
+        abort(404)
+    try:
+        t = float(request.args.get("t", 1))
+    except (TypeError, ValueError):
+        t = 1
+    if t < 0:
+        t = 0
+    meta = get_media_meta(str(p))
+    dur = meta.get("duration") or 0
+    if dur and t > dur:
+        t = dur - 0.1
+    # 原始分辨率截图，避免缩放导致选区坐标换算误差
+    ts = f"{int(t // 3600):02d}:{int(t % 3600 // 60):02d}:{t % 60:06.3f}"
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+    tmp.close()
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-ss", ts, "-i", str(p), "-vframes", "1", tmp.name,
+    ]
+    try:
+        subprocess.run(cmd, timeout=30, check=False)
+        if os.path.exists(tmp.name):
+            return send_file(tmp.name, mimetype="image/jpeg")
+    except Exception:
+        pass
+    finally:
+        try:
+            os.remove(tmp.name)
+        except OSError:
+            pass
+    abort(404)
+
+
 def start_task(task_id, args, duration, workdir):
     import threading
     t = threading.Thread(
         target=run_ffmpeg, args=(args, task_id, workdir), daemon=True
     )
     t.start()
+
+
+def run_inpaint(src, out, x, y, w, h, radius, task_id):
+    """后台执行 OpenCV inpaint 去字幕，并更新任务进度。
+
+    内部使用互斥闸门，多个 inpaint 任务串行执行；排队期间任务状态显示为 'queued'。
+    """
+    from desub_inpaint import inpaint_video
+
+    inpaint_acquire(task_id)
+    try:
+        _run_inpaint_impl(src, out, x, y, w, h, radius, task_id)
+    finally:
+        inpaint_release()
+
+
+def _run_inpaint_impl(src, out, x, y, w, h, radius, task_id):
+    from desub_inpaint import inpaint_video
+
+    # 拿到闸门后把状态切回 running
+    if task_id in TASKS:
+        TASKS[task_id]["status"] = "running"
+        save_tasks()
+
+    last_saved = 0.0
+    PROGRESS_EVERY = 0.5  # 秒：进度节流，避免每帧写盘
+
+    def _on_progress(done, total, elapsed):
+        nonlocal last_saved
+        now = time.time()
+        # 节流：每 0.5s 才落盘一次；以及完成/失败时强制落盘
+        if (now - last_saved) >= PROGRESS_EVERY or done == total:
+            if total and total > 0:
+                pct = max(0, min(100, int(done * 100 / total)))
+            else:
+                # 没有总帧数时，按 elapsed 推一个下限百分比，1s 走 1%，最多 99
+                pct = max(0, min(99, int(elapsed)))
+            t = TASKS.get(task_id)
+            if t:
+                t["progress"] = pct
+                t["duration"] = float(total) if total else t.get("duration", 0)
+                save_tasks()
+            last_saved = now
+
+    try:
+        ok, msg = inpaint_video(src, out, x, y, w, h, radius, on_progress=_on_progress)
+    except ImportError:
+        TASKS[task_id]["status"] = "failed"
+        TASKS[task_id]["error"] = "未安装 opencv-python，无法使用智能修复。请运行: pip install opencv-python-headless"
+        save_tasks()
+        return
+    if not ok:
+        TASKS[task_id]["status"] = "failed"
+        TASKS[task_id]["error"] = msg
+        TASKS[task_id]["progress"] = 0
+    else:
+        TASKS[task_id]["status"] = "finished"
+        TASKS[task_id]["progress"] = 100
+    TASKS[task_id]["elapsed"] = int(time.time() - (TASKS[task_id].get("created_at") or time.time()))
+    save_tasks()
 
 
 def new_task(name, duration=0, output_name=None):
@@ -939,6 +1083,85 @@ def api_speed():
     return jsonify({"task_id": task_id})
 
 
+# ---------------- 去除字幕/硬字幕 ----------------
+@app.route("/api/desubtitle", methods=["POST"])
+def api_desubtitle():
+    data = request.json
+    file_id = secure_filename(data["file_id"])
+    src = UPLOAD_DIR / file_id
+    if not src.exists():
+        return jsonify({"error": "源文件不存在"}), 404
+    meta = get_media_meta(str(src))
+    vw = meta.get("width") or 0
+    vh = meta.get("height") or 0
+    mode = data.get("mode", "delogo")
+    # 字幕多位于画面中下部，默认遮盖底部 1/3 区域；坐标/尺寸可手动指定
+    x = int(data.get("x", 0) or 0)
+    y = int(data.get("y", 0) or (vh * 2 // 3 if vh else 0))
+    w = int(data.get("w", 0) or vw)
+    h = int(data.get("h", 0) or (vh // 3 if vh else 0))
+    # 保证区域不越界且为偶数（部分滤镜要求）
+    w = max(2, min(w, vw - x)) if vw else w
+    h = max(2, min(h, vh - y)) if vh else h
+    w -= w % 2
+    h -= h % 2
+
+    if mode == "inpaint":
+        # 内容感知修复：逐帧用 OpenCV inpaint 重建被遮盖区域（最接近无痕）
+        radius = max(1, int(data.get("radius", 6) or 6))
+        out = OUTPUT_DIR / f"desub_{src.stem}_{int(time.time())}{src.suffix}"
+        task_id = new_task(f"去字幕(智能修复) {w}x{h}@{x},{y}",
+                           duration=meta.get("duration", 0))
+        TASKS[task_id]["output_name"] = out.name
+        save_tasks()
+        import threading
+        threading.Thread(
+            target=run_inpaint, args=(str(src), str(out), x, y, w, h, radius, task_id),
+            daemon=True,
+        ).start()
+        return jsonify({"task_id": task_id})
+
+    if mode == "mosaic":
+        block = max(2, int(data.get("strength", 16) or 16))
+        region = (f"crop={w}:{h}:{x}:{y},"
+                  f"scale=iw/{block}:ih/{block},"
+                  f"scale={w}:{h}:flags=neighbor")
+        tag = f"马赛克块{block}"
+    elif mode == "blur":
+        sigma = max(1.0, float(data.get("strength", 12) or 12))
+        region = f"crop={w}:{h}:{x}:{y},gblur=sigma={sigma:.1f}"
+        tag = f"模糊σ{sigma:.0f}"
+    else:  # delogo：基于周边像素平滑插值，比模糊自然
+        # strength 作为向外扩展的羽化边距（像素），让边缘过渡更自然
+        pad = max(0, int(data.get("strength", 8) or 8))
+        # delogo 要求区域四周至少留 2px 余量（否则报 outside of frame）
+        dx = max(2, x - pad)
+        dy = max(2, y - pad)
+        dw = min((vw - 2 - dx) if vw else (w + pad * 2), w + pad * 2)
+        dh = min((vh - 2 - dy) if vh else (h + pad * 2), h + pad * 2)
+        dw = max(4, dw); dh = max(4, dh)
+        vf = f"delogo=x={dx}:y={dy}:w={dw}:h={dh}"
+        tag = f"边缘修复{pad}"
+        out = OUTPUT_DIR / f"desub_{src.stem}_{int(time.time())}{src.suffix}"
+        args = ["-i", str(src), "-vf", vf, "-c:a", "copy", str(out)]
+        task_id = new_task(f"去字幕({tag}) {w}x{h}@{x},{y}",
+                           duration=meta.get("duration", 0))
+        TASKS[task_id]["output_name"] = out.name
+        save_tasks()
+        start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+        return jsonify({"task_id": task_id})
+
+    vf = f"[0:v]split=2[full][r];[r]{region}[proc];[full][proc]overlay={x}:{y}"
+    out = OUTPUT_DIR / f"desub_{src.stem}_{int(time.time())}{src.suffix}"
+    args = ["-i", str(src), "-vf", vf, "-c:a", "copy", str(out)]
+    task_id = new_task(f"去字幕({tag}) {w}x{h}@{x},{y}",
+                       duration=meta.get("duration", 0))
+    TASKS[task_id]["output_name"] = out.name
+    save_tasks()
+    start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+    return jsonify({"task_id": task_id})
+
+
 @app.route("/api/tasks")
 def api_tasks():
     tasks = sorted(TASKS.values(), key=lambda t: t.get("created_at", 0), reverse=True)
@@ -951,6 +1174,36 @@ def api_task(task_id):
     if not task:
         abort(404)
     return jsonify(task)
+
+
+@app.route("/api/task/<task_id>/delete", methods=["POST"])
+def api_task_delete(task_id):
+    """删除已完成/失败的任务记录，可选一并删除输出文件。"""
+    task = TASKS.get(task_id)
+    if not task:
+        return jsonify({"error": "任务不存在"}), 404
+    if task.get("status") == "running":
+        return jsonify({"error": "任务进行中，无法删除"}), 400
+    # 删除输出文件（仅限 outputs 目录内，防越权）
+    out_name = task.get("output_name")
+    if out_name:
+        p = (OUTPUT_DIR / secure_filename(out_name))
+        if p.exists() and p.parent == OUTPUT_DIR:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    out_dir = task.get("output_dir")
+    if out_dir:
+        d = pathlib.Path(out_dir)
+        if d.exists() and str(d).startswith(str(OUTPUT_DIR)):
+            try:
+                shutil.rmtree(d, ignore_errors=True)
+            except OSError:
+                pass
+    TASKS.pop(task_id, None)
+    save_tasks()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/download/<file_id>")

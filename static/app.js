@@ -259,6 +259,190 @@ $("#comp-crf").addEventListener("input", (e) => {
   $("#comp-crf-val").textContent = e.target.value;
 });
 
+// 去字幕：强度滑块显示 + 模式切换标签
+$("#desub-strength").addEventListener("input", (e) => {
+  $("#desub-strength-val").textContent = e.target.value;
+});
+$$('input[name="desub-mode"]').forEach((r) => {
+  r.addEventListener("change", () => {
+    const v = r.value;
+    const cfg = {
+      delogo: { label: "边缘羽化宽度 (px)", min: 1, max: 30, step: 1, val: 8 },
+      inpaint: { label: "修复强度 (半径)", min: 1, max: 10, step: 1, val: 6 },
+      blur: { label: "模糊强度 (σ)", min: 6, max: 50, step: 1, val: 25 },
+      mosaic: { label: "马赛克块大小 (px)", min: 4, max: 64, step: 2, val: 16 },
+    }[v] || { label: "强度", min: 1, max: 30, step: 1, val: 8 };
+    $("#desub-strength-label").textContent = cfg.label;
+    $("#desub-strength").min = cfg.min;
+    $("#desub-strength").max = cfg.max;
+    $("#desub-strength").step = cfg.step;
+    $("#desub-strength").value = cfg.val;
+    $("#desub-strength-val").textContent = cfg.val;
+  });
+});
+
+// ---------- 去字幕：帧预览 + 选区框 ----------
+const desub = {
+  sel: { x: 0, y: 0, w: 0, h: 0 }, // 视频分辨率坐标
+  dragging: false, resizing: false, sx: 0, sy: 0, ox: 0, oy: 0, ow: 0, oh: 0,
+};
+const $stage = $("#desub-stage");
+const $frame = $("#desub-frame");
+const $box = $("#desub-box");
+const $noselect = $("#desub-noselect");
+
+function desubDuration() {
+  return (state.meta && state.meta.duration) || 0;
+}
+async function loadDesubFrame() {
+  if (!state.selected) {
+    $noselect.style.display = "grid";
+    $frame.style.display = "none";
+    $box.style.display = "none";
+    return;
+  }
+  $noselect.style.display = "none";
+  const dur = desubDuration();
+  const maxT = Math.max(0, dur - 0.2);
+  const t = (parseFloat($("#desub-time").value) / 100) * (maxT || 1);
+  $("#desub-time-val").textContent = t.toFixed(1) + "s";
+  const url = `/api/frame/${encodeURIComponent(state.selected)}?t=${t.toFixed(3)}&_=${Date.now()}`;
+  $frame.style.display = "block";
+  $frame.src = url;
+}
+// 帧加载完成后按比例绘制默认选区（底部 1/3）
+$frame.addEventListener("load", () => {
+  const vw = state.meta && state.meta.width;
+  const vh = state.meta && state.meta.height;
+  if (!vw || !vh) return;
+  // 默认底部 1/3
+  desub.sel = { x: 0, y: Math.round(vh * 2 / 3), w: vw, h: Math.round(vh / 3) };
+  syncInputsFromSel();
+  drawBoxFromSel();
+});
+function drawBoxFromSel() {
+  const vw = state.meta && state.meta.width;
+  const vh = state.meta && state.meta.height;
+  if (!vw || !vh) return;
+  const dispW = $frame.clientWidth;
+  const dispH = $frame.clientHeight;
+  if (!dispW || !dispH) return;
+  const sx = dispW / vw, sy = dispH / vh;
+  $box.style.display = "block";
+  $box.style.left = (desub.sel.x * sx) + "px";
+  $box.style.top = (desub.sel.y * sy) + "px";
+  $box.style.width = (desub.sel.w * sx) + "px";
+  $box.style.height = (desub.sel.h * sy) + "px";
+}
+function syncInputsFromSel() {
+  $("#desub-x").value = desub.sel.x;
+  $("#desub-y").value = desub.sel.y;
+  $("#desub-w").value = desub.sel.w;
+  $("#desub-h").value = desub.sel.h;
+}
+function syncSelFromInputs() {
+  desub.sel.x = Math.max(0, parseInt($("#desub-x").value) || 0);
+  desub.sel.y = Math.max(0, parseInt($("#desub-y").value) || 0);
+  desub.sel.w = Math.max(2, parseInt($("#desub-w").value) || 2);
+  desub.sel.h = Math.max(2, parseInt($("#desub-h").value) || 2);
+  drawBoxFromSel();
+}
+["desub-x", "desub-y", "desub-w", "desub-h"].forEach((id) => {
+  $("#" + id).addEventListener("input", syncSelFromInputs);
+});
+
+// 拖拽移动 + 缩放
+function evtPos(e) {
+  const rect = $stage.getBoundingClientRect();
+  const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+  const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+  return { cx, cy };
+}
+$box.addEventListener("mousedown", (e) => {
+  if (e.target.classList.contains("desub-handle")) return;
+  desub.dragging = true;
+  const { cx, cy } = evtPos(e);
+  desub.sx = cx; desub.sy = cy;
+  desub.ox = desub.sel.x; desub.oy = desub.sel.y;
+  e.preventDefault();
+});
+$box.querySelector(".desub-handle").addEventListener("mousedown", (e) => {
+  desub.resizing = true;
+  const { cx, cy } = evtPos(e);
+  desub.sx = cx; desub.sy = cy;
+  desub.ow = desub.sel.w; desub.oh = desub.sel.h;
+  e.stopPropagation(); e.preventDefault();
+});
+window.addEventListener("mousemove", (e) => {
+  if (!desub.dragging && !desub.resizing) return;
+  const vw = state.meta && state.meta.width;
+  const vh = state.meta && state.meta.height;
+  if (!vw || !vh) return;
+  const dispW = $frame.clientWidth, dispH = $frame.clientHeight;
+  if (!dispW || !dispH) return;
+  const sx = vw / dispW, sy = vh / dispH;
+  const { cx, cy } = evtPos(e);
+  if (desub.dragging) {
+    let nx = desub.ox + (cx - desub.sx) * sx;
+    let ny = desub.oy + (cy - desub.sy) * sy;
+    nx = Math.max(0, Math.min(nx, vw - desub.sel.w));
+    ny = Math.max(0, Math.min(ny, vh - desub.sel.h));
+    desub.sel.x = Math.round(nx); desub.sel.y = Math.round(ny);
+  } else if (desub.resizing) {
+    let nw = desub.ow + (cx - desub.sx) * sx;
+    let nh = desub.oh + (cy - desub.sy) * sy;
+    nw = Math.max(2, Math.min(nw, vw - desub.sel.x));
+    nh = Math.max(2, Math.min(nh, vh - desub.sel.y));
+    desub.sel.w = Math.round(nw); desub.sel.h = Math.round(nh);
+  }
+  drawBoxFromSel(); syncInputsFromSel();
+});
+window.addEventListener("mouseup", () => { desub.dragging = false; desub.resizing = false; });
+// 触摸支持
+$box.addEventListener("touchstart", (e) => {
+  const { cx, cy } = evtPos(e);
+  if (e.target.classList.contains("desub-handle")) {
+    desub.resizing = true; desub.sx = cx; desub.sy = cy; desub.ow = desub.sel.w; desub.oh = desub.sel.h;
+  } else {
+    desub.dragging = true; desub.sx = cx; desub.sy = cy; desub.ox = desub.sel.x; desub.oy = desub.sel.y;
+  }
+  e.preventDefault();
+}, { passive: false });
+window.addEventListener("touchmove", (e) => {
+  if (!desub.dragging && !desub.resizing) return;
+  const vw = state.meta && state.meta.width, vh = state.meta && state.meta.height;
+  if (!vw || !vh) return;
+  const dispW = $frame.clientWidth, dispH = $frame.clientHeight;
+  if (!dispW || !dispH) return;
+  const sx = vw / dispW, sy = vh / dispH;
+  const { cx, cy } = evtPos(e);
+  if (desub.dragging) {
+    let nx = Math.max(0, Math.min(desub.ox + (cx - desub.sx) * sx, vw - desub.sel.w));
+    let ny = Math.max(0, Math.min(desub.oy + (cy - desub.sy) * sy, vh - desub.sel.h));
+    desub.sel.x = Math.round(nx); desub.sel.y = Math.round(ny);
+  } else if (desub.resizing) {
+    let nw = Math.max(2, Math.min(desub.ow + (cx - desub.sx) * sx, vw - desub.sel.x));
+    let nh = Math.max(2, Math.min(desub.oh + (cy - desub.sy) * sy, vh - desub.sel.y));
+    desub.sel.w = Math.round(nw); desub.sel.h = Math.round(nh);
+  }
+  drawBoxFromSel(); syncInputsFromSel();
+});
+window.addEventListener("touchend", () => { desub.dragging = false; desub.resizing = false; });
+
+// 时间滑块 + 加载帧
+$("#desub-time").addEventListener("input", loadDesubFrame);
+$("#desub-loadframe").addEventListener("click", loadDesubFrame);
+// 切换去字幕 tab 时自动加载默认帧
+$$('.tab').forEach((tab) => {
+  tab.addEventListener("click", () => {
+    if (tab.dataset.tab === "desubtitle") {
+      const dur = desubDuration();
+      $("#desub-time").max = dur ? Math.round(dur * 100) : 100;
+      loadDesubFrame();
+    }
+  });
+});
+
 // 水印图片上传
 let wmUploadedId = null;
 $("#wm-image-file").addEventListener("change", async (e) => {
@@ -316,6 +500,7 @@ async function runAction(action, payload, opts = {}) {
     rotate: "/api/rotate",
     watermark: "/api/watermark",
     speed: "/api/speed",
+    desubtitle: "/api/desubtitle",
   };
   try {
     const r = await api(map[action], {
@@ -324,6 +509,7 @@ async function runAction(action, payload, opts = {}) {
       body: JSON.stringify(payload),
     });
     toast("任务已提交", "ok");
+    loadTasks();
     startPolling();
   } catch (e) {
     toast(e.message, "err");
@@ -408,6 +594,18 @@ $$("[data-action]").forEach((btn) => {
         speed: parseFloat($("#speed-val").value),
         reverse: $("#speed-reverse").checked,
       });
+    } else if (a === "desubtitle") {
+      const mode = $('input[name="desub-mode"]:checked').value;
+      const payload = {
+        mode,
+        strength: $("#desub-strength").value,
+        x: parseInt($("#desub-x").value) || desub.sel.x || null,
+        y: parseInt($("#desub-y").value) || desub.sel.y || null,
+        w: parseInt($("#desub-w").value) || desub.sel.w || null,
+        h: parseInt($("#desub-h").value) || desub.sel.h || null,
+      };
+      if (mode === "inpaint") payload.radius = payload.strength;
+      runAction("desubtitle", payload);
     }
   });
 });
@@ -421,35 +619,38 @@ async function loadTasks() {
       box.innerHTML = '<p class="empty">暂无任务。</p>';
       return;
     }
-    box.innerHTML = "";
-    tasks.forEach((t, i) => {
-      const el = document.createElement("div");
-      el.className = "task-item";
-      el.style.animationDelay = (i * 50) + "ms";
+    // 后端 /api/tasks 已按最新在前排序，直接渲染（新任务置顶）
+    const rows = tasks.map((t) => {
       const st = t.status;
-      const stText = { running: "处理中", finished: "已完成", failed: "失败" }[st] || st;
+      const stText = { running: "处理中", queued: "排队中", finished: "已完成", done: "已完成", failed: "失败" }[st] || st;
       const pct = t.progress == null ? "" : ` · ${t.progress}%`;
       let actions = "";
-      if (st === "finished") {
-        if (t.output_dir) {
-          actions = `<a href="/api/download_dir/${t.task_id}">⬇ 下载全部 (ZIP)</a>`;
-        } else if (t.output_name) {
-          actions = `<a href="/api/download/${encodeURIComponent(t.output_name)}">⬇ 下载</a>`;
-        }
+      if (st === "finished" || st === "done" || st === "failed") {
+        const dl = t.output_dir
+          ? `<a href="/api/download_dir/${t.task_id}">⬇ 下载全部 (ZIP)</a>`
+          : (t.output_name
+              ? `<a href="/api/download/${encodeURIComponent(t.output_name)}">⬇ 下载</a>`
+              : "");
+        actions = dl + `<a href="javascript:void(0)" class="task-del" data-id="${t.task_id}">🗑 删除</a>`;
       }
       const prog = t.progress == null
         ? `<div class="progress-bar"><div class="progress-fill" style="width:100%"></div></div>`
         : `<div class="progress-bar"><div class="progress-fill" style="width:${t.progress}%"></div></div>`;
-      el.innerHTML = `
-        <div class="task-head">
-          <span class="task-name">${esc(t.name)}</span>
-          <span class="task-status status-${st}">${stText}${pct}</span>
-        </div>
-        ${st === "running" ? prog : ""}
-        ${actions ? `<div class="task-actions">${actions}</div>` : ""}
-        ${t.error ? `<div class="task-error">${esc(t.error)}</div>` : ""}`;
-      box.appendChild(el);
+      const elapsed = t.elapsed ? ` · 耗时 ${fmt_dur(t.elapsed)}` : "";
+      const submitAt = t.created_at ? fmt_time(t.created_at) : "";
+      return `
+        <div class="task-item" data-id="${t.task_id}">
+          <div class="task-head">
+            <span class="task-name">${esc(t.name)}</span>
+            <span class="task-status status-${st}">${stText}${pct}${elapsed}</span>
+          </div>
+          <div class="task-meta">提交时间：${submitAt}</div>
+          ${(st === "running" || st === "queued") ? prog : ""}
+          ${actions ? `<div class="task-actions">${actions}</div>` : ""}
+          ${t.error ? `<div class="task-error">${esc(t.error)}</div>` : ""}
+        </div>`;
     });
+    box.innerHTML = rows.join("");
   } catch (e) {
     // ignore
   }
@@ -457,12 +658,16 @@ async function loadTasks() {
 
 let polling = false;
 function startPolling() {
-  if (polling) return;
+  if (polling) {
+    // 已在轮询中，立即刷新一次即可
+    loadTasks();
+    return;
+  }
   polling = true;
   const tick = async () => {
     await loadTasks();
     const { tasks } = await api("/api/tasks").catch(() => ({ tasks: [] }));
-    const anyRunning = tasks.some((t) => t.status === "running");
+    const anyRunning = tasks.some((t) => t.status === "running" || t.status === "queued");
     if (anyRunning) {
       setTimeout(tick, 1500);
     } else {
@@ -473,6 +678,18 @@ function startPolling() {
 }
 
 // ---------- 工具 ----------
+function fmt_dur(sec) {
+  sec = Math.max(0, Math.floor(sec || 0));
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}分${String(s).padStart(2, "0")}秒` : `${s}秒`;
+}
+function fmt_time(ts) {
+  const d = new Date((ts || 0) * 1000);
+  if (isNaN(d.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
 function fmtDur(s) {
   s = Math.floor(s);
   const h = Math.floor(s / 3600);
@@ -500,3 +717,24 @@ $("#refresh-tasks").addEventListener("click", loadTasks);
 loadVersion();
 loadFiles();
 loadTasks();
+
+// 任务删除按钮（事件委托，避免重复渲染丢失绑定）
+const taskListEl = $("#task-list");
+if (taskListEl) {
+  taskListEl.addEventListener("click", async (e) => {
+    const del = e.target.closest(".task-del");
+    if (!del) return;
+    e.preventDefault();
+    const id = del.getAttribute("data-id");
+    if (!id) return;
+    if (!confirm("确定删除该任务记录？输出文件也会被一并删除。")) return;
+    del.textContent = "删除中…";
+    try {
+      const r = await api(`/api/task/${id}/delete`, { method: "POST" });
+      if (r && r.ok) loadTasks();
+    } catch (err) {
+      alert("删除失败：" + err);
+      loadTasks();
+    }
+  });
+}
