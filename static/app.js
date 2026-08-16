@@ -44,45 +44,134 @@ async function loadFiles() {
     }
     box.innerHTML = "";
     files.forEach((f, i) => {
-      const el = document.createElement("div");
-      el.className = "file-item" + (state.selected === f.file_id ? " active" : "");
-      el.style.animationDelay = (i * 45) + "ms";
-      const isVideo = f.meta && f.meta.has_video;
-      const icon = isVideo ? "🎞️" : (f.meta && f.meta.has_audio ? "🎵" : "📄");
-      const dur = f.meta && f.meta.duration ? fmtDur(f.meta.duration) : "";
-      const res = f.meta && f.meta.width ? `${f.meta.width}×${f.meta.height}` : "";
-      el.innerHTML = `
-        <span class="fi-icon">${icon}</span>
-        <div class="fi-info">
-          <div class="fi-name" title="${esc(f.filename)}">${esc(f.filename)}</div>
-          <div class="fi-meta">${res} ${dur} · ${f.size_human}</div>
-        </div>
-        <span class="fi-del" title="删除">✕</span>`;
-      el.addEventListener("click", (e) => {
-        if (e.target.classList.contains("fi-del")) {
-          e.stopPropagation();
-          deleteFile(f.file_id);
-          return;
-        }
-        selectFile(f.file_id);
-      });
-      box.appendChild(el);
+      box.appendChild(renderFileItem(f, i));
     });
+    updateFileBulkbar();
   } catch (e) {
     toast(e.message, "err");
   }
 }
 
-async function deleteFile(fileId) {
-  if (!confirm("确定删除该文件？")) return;
-  await api("/api/delete_upload/" + fileId, { method: "POST" });
-  if (state.selected === fileId) {
-    state.selected = null;
-    $("#workbench").classList.add("hidden");
-    $("#no-select").classList.remove("hidden");
-  }
-  loadFiles();
+function renderFileItem(f, i = 0) {
+  const el = document.createElement("div");
+  el.className = "file-item has-check" + (state.selected === f.file_id ? " active" : "");
+  el.dataset.fileId = f.file_id;
+  el.style.animationDelay = (i * 45) + "ms";
+  const isVideo = f.meta && f.meta.has_video;
+  const icon = isVideo ? "🎞️" : (f.meta && f.meta.has_audio ? "🎵" : "📄");
+  const dur = f.meta && f.meta.duration ? fmtDur(f.meta.duration) : "";
+  const res = f.meta && f.meta.width ? `${f.meta.width}×${f.meta.height}` : "";
+  el.innerHTML = `
+    <input type="checkbox" class="row-check file-chk" />
+    <span class="fi-icon">${icon}</span>
+    <div class="fi-main">
+      <div class="fi-name" title="${esc(f.filename)}">${esc(f.filename)}</div>
+      <div class="fi-meta">${res} ${dur} · ${f.size_human}</div>
+    </div>
+    <span class="fi-del" title="删除">✕</span>`;
+  el.querySelector(".file-chk").addEventListener("change", (e) => {
+    e.stopPropagation();
+    updateFileBulkbar();
+  });
+  el.querySelector(".fi-del").addEventListener("click", (e) => {
+    e.stopPropagation();
+    deleteFile(f.file_id, f.filename);
+  });
+  el.addEventListener("click", (e) => {
+    if (e.target.classList.contains("file-chk")) return;
+    if (e.target.classList.contains("fi-del")) return;
+    selectFile(f.file_id);
+  });
+  return el;
 }
+
+async function deleteFile(fileId, name) {
+  const ok = await showConfirm({
+    title: "删除文件",
+    text: `确定删除「${name || fileId}」？\n删除后无法恢复。`,
+  });
+  if (!ok) return;
+  try {
+    await api("/api/delete_upload/" + fileId, { method: "POST" });
+    if (state.selected === fileId) {
+      state.selected = null;
+      $("#workbench").classList.add("hidden");
+      $("#no-select").classList.remove("hidden");
+    }
+    toast("已删除", "ok");
+    await loadFiles();
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+
+// 文件批量选择
+const MAX_BULK = 5;
+
+function updateFileBulkbar() {
+  const chks = $$("#file-list .file-chk");
+  const checked = $$("#file-list .file-chk:checked");
+  const bar = $("#file-bulkbar");
+  const count = $("#file-sel-count");
+  if (!chks.length) { bar.classList.remove("show"); return; }
+  bar.classList.add("show");
+  count.textContent = `已选 ${checked.length} / ${MAX_BULK} 项`;
+  const all = $("#file-select-all");
+  all.checked = checked.length === chks.length && chks.length > 0;
+  all.indeterminate = checked.length > 0 && checked.length < chks.length;
+  // 超出上限时禁用多余复选框
+  if (checked.length >= MAX_BULK) {
+    chks.forEach((c) => { if (!c.checked) c.disabled = true; });
+  } else {
+    chks.forEach((c) => (c.disabled = false));
+  }
+}
+
+$("#file-list").addEventListener("change", (e) => {
+  if (!e.target.classList.contains("file-chk")) return;
+  const checked = $$("#file-list .file-chk:checked");
+  if (checked.length > MAX_BULK) {
+    e.target.checked = false;
+    toast(`最多只能选择 ${MAX_BULK} 个`, "err");
+  }
+  updateFileBulkbar();
+});
+
+$("#file-select-all").addEventListener("change", (e) => {
+  const chks = Array.from($$("#file-list .file-chk"));
+  chks.forEach((c, i) => (c.checked = e.target.checked && i < MAX_BULK));
+  updateFileBulkbar();
+});
+
+$("#file-bulk-del").addEventListener("click", async () => {
+  const ids = Array.from($$("#file-list .file-chk:checked")).map((c) => c.closest(".file-item").dataset.fileId);
+  if (!ids.length) return;
+  if (ids.length > MAX_BULK) {
+    toast(`最多只能删除 ${MAX_BULK} 个`, "err");
+    return;
+  }
+  const ok = await showConfirm({
+    title: "批量删除文件",
+    text: `确定删除选中的 ${ids.length} 个文件？\n删除后无法恢复。`,
+  });
+  if (!ok) return;
+  try {
+    const r = await api("/api/delete_uploads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_ids: ids }),
+    });
+    if (ids.includes(state.selected)) {
+      state.selected = null;
+      $("#workbench").classList.add("hidden");
+      $("#no-select").classList.remove("hidden");
+    }
+    toast(`已删除 ${r.count} 个文件`, "ok");
+    await loadFiles();
+  } catch (e) {
+    toast(e.message, "err");
+  }
+});
 
 async function uploadFile(file) {
   const fd = new FormData();
@@ -278,6 +367,7 @@ $$('input[name="desub-mode"]').forEach((r) => {
     $("#desub-strength").step = cfg.step;
     $("#desub-strength").value = cfg.val;
     $("#desub-strength-val").textContent = cfg.val;
+    $("#desub-quality-group").style.display = v === "inpaint" ? "block" : "none";
   });
 });
 
@@ -562,7 +652,7 @@ $$("[data-action]").forEach((btn) => {
         h: $("#crop-h").value || null,
       });
     } else if (a === "merge") {
-      const ids = $$(".merge-chk:checked").map((c) => c.value);
+      const ids = Array.from($$(".merge-chk:checked")).map((c) => c.value);
       if (ids.length < 2) { toast("请至少选择 2 个文件", "err"); return; }
       runAction("merge", { file_ids: ids }, { noFile: true });
     } else if (a === "rotate") {
@@ -604,7 +694,10 @@ $$("[data-action]").forEach((btn) => {
         w: parseInt($("#desub-w").value) || desub.sel.w || null,
         h: parseInt($("#desub-h").value) || desub.sel.h || null,
       };
-      if (mode === "inpaint") payload.radius = payload.strength;
+      if (mode === "inpaint") {
+        payload.radius = payload.strength;
+        payload.quality = $('input[name="desub-quality"]:checked').value || "standard";
+      }
       runAction("desubtitle", payload);
     }
   });
@@ -624,6 +717,7 @@ async function loadTasks() {
       const st = t.status;
       const stText = { running: "处理中", queued: "排队中", finished: "已完成", done: "已完成", failed: "失败" }[st] || st;
       const pct = t.progress == null ? "" : ` · ${t.progress}%`;
+      const locked = st === "running" || st === "queued";
       let actions = "";
       if (st === "finished" || st === "done" || st === "failed") {
         const dl = t.output_dir
@@ -639,22 +733,93 @@ async function loadTasks() {
       const elapsed = t.elapsed ? ` · 耗时 ${fmt_dur(t.elapsed)}` : "";
       const submitAt = t.created_at ? fmt_time(t.created_at) : "";
       return `
-        <div class="task-item" data-id="${t.task_id}">
-          <div class="task-head">
-            <span class="task-name">${esc(t.name)}</span>
-            <span class="task-status status-${st}">${stText}${pct}${elapsed}</span>
+        <div class="task-item has-check${locked ? " locked" : ""}" data-id="${t.task_id}">
+          ${locked ? "" : '<input type="checkbox" class="row-check task-chk" />'}
+          <div class="task-main">
+            <div class="task-head">
+              <span class="task-name">${esc(t.name)}</span>
+              <span class="task-status status-${st}">${stText}${pct}${elapsed}</span>
+            </div>
+            <div class="task-meta">提交时间：${submitAt}</div>
+            ${(st === "running" || st === "queued") ? prog : ""}
+            ${actions ? `<div class="task-actions">${actions}</div>` : ""}
+            ${t.error ? `<div class="task-error">${esc(t.error)}</div>` : ""}
           </div>
-          <div class="task-meta">提交时间：${submitAt}</div>
-          ${(st === "running" || st === "queued") ? prog : ""}
-          ${actions ? `<div class="task-actions">${actions}</div>` : ""}
-          ${t.error ? `<div class="task-error">${esc(t.error)}</div>` : ""}
         </div>`;
     });
     box.innerHTML = rows.join("");
+    $$("#task-list .task-chk").forEach((c) => {
+      c.addEventListener("change", updateTaskBulkbar);
+    });
+    updateTaskBulkbar();
   } catch (e) {
     // ignore
   }
 }
+
+// 任务批量选择
+function updateTaskBulkbar() {
+  const chks = $$("#task-list .task-chk");
+  const checked = $$("#task-list .task-chk:checked");
+  const bar = $("#task-bulkbar");
+  const count = $("#task-sel-count");
+  if (!chks.length) { bar.classList.remove("show"); return; }
+  bar.classList.add("show");
+  count.textContent = `已选 ${checked.length} / ${MAX_BULK} 项`;
+  const all = $("#task-select-all");
+  all.checked = checked.length === chks.length;
+  all.indeterminate = checked.length > 0 && checked.length < chks.length;
+  if (checked.length >= MAX_BULK) {
+    chks.forEach((c) => { if (!c.checked) c.disabled = true; });
+  } else {
+    chks.forEach((c) => (c.disabled = false));
+  }
+}
+
+$("#task-list").addEventListener("change", (e) => {
+  if (!e.target.classList.contains("task-chk")) return;
+  const checked = $$("#task-list .task-chk:checked");
+  if (checked.length > MAX_BULK) {
+    e.target.checked = false;
+    toast(`最多只能选择 ${MAX_BULK} 个`, "err");
+  }
+  updateTaskBulkbar();
+});
+
+$("#task-select-all").addEventListener("change", (e) => {
+  const chks = Array.from($$("#task-list .task-chk"));
+  chks.forEach((c, i) => (c.checked = e.target.checked && i < MAX_BULK));
+  updateTaskBulkbar();
+});
+
+$("#task-bulk-del").addEventListener("click", async () => {
+  const ids = Array.from($$("#task-list .task-chk:checked")).map((c) => c.closest(".task-item").dataset.id);
+  if (!ids.length) return;
+  if (ids.length > MAX_BULK) {
+    toast(`最多只能删除 ${MAX_BULK} 个`, "err");
+    return;
+  }
+  const ok = await showConfirm({
+    title: "批量删除任务",
+    text: `确定删除选中的 ${ids.length} 个任务？\n其输出文件会被一并删除，正在处理的任务不会被删除。`,
+  });
+  if (!ok) return;
+  try {
+    const r = await api("/api/tasks/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task_ids: ids }),
+    });
+    if (r.skipped && r.skipped.length) {
+      toast(`已删除 ${r.count} 个，跳过 ${r.skipped.length} 个进行中任务`, "ok");
+    } else {
+      toast(`已删除 ${r.count} 个任务`, "ok");
+    }
+    await loadTasks();
+  } catch (e) {
+    toast(e.message, "err");
+  }
+});
 
 let polling = false;
 function startPolling() {
@@ -727,14 +892,51 @@ if (taskListEl) {
     e.preventDefault();
     const id = del.getAttribute("data-id");
     if (!id) return;
-    if (!confirm("确定删除该任务记录？输出文件也会被一并删除。")) return;
+    const ok = await showConfirm({
+      title: "删除任务",
+      text: "确定删除该任务？其输出文件也会被一并删除。",
+    });
+    if (!ok) return;
     del.textContent = "删除中…";
     try {
       const r = await api(`/api/task/${id}/delete`, { method: "POST" });
       if (r && r.ok) loadTasks();
     } catch (err) {
-      alert("删除失败：" + err);
+      toast("删除失败：" + err.message, "err");
       loadTasks();
     }
   });
 }
+
+// ---------- 自定义确认弹框 ----------
+let _modalResolve = null;
+function showConfirm({ title = "确认操作", text = "", confirmText = "删除", type = "danger" } = {}) {
+  return new Promise((resolve) => {
+    const mask = $("#modal-mask");
+    const icon = $("#modal-icon");
+    $("#modal-title").textContent = title;
+    $("#modal-text").textContent = text;
+    const confirmBtn = $("#modal-confirm");
+    confirmBtn.textContent = confirmText;
+    confirmBtn.className = "btn " + (type === "danger" ? "btn-danger" : "btn-primary");
+    icon.className = "modal-icon" + (type === "danger" ? "" : " info");
+    icon.textContent = type === "danger" ? "⚠️" : "ℹ️";
+    _modalResolve = resolve;
+    mask.classList.add("show");
+  });
+}
+
+function closeModal(result) {
+  const mask = $("#modal-mask");
+  mask.classList.remove("show");
+  if (_modalResolve) { _modalResolve(result); _modalResolve = null; }
+}
+
+$("#modal-confirm").addEventListener("click", () => closeModal(true));
+$("#modal-cancel").addEventListener("click", () => closeModal(false));
+$("#modal-mask").addEventListener("click", (e) => { if (e.target.id === "modal-mask") closeModal(false); });
+document.addEventListener("keydown", (e) => {
+  if (!$("#modal-mask").classList.contains("show")) return;
+  if (e.key === "Escape") closeModal(false);
+  if (e.key === "Enter") closeModal(true);
+});

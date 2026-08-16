@@ -391,3 +391,69 @@ input[type="radio"] { accent-color: var(--primary); width: 16px; height: 16px; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 6px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: #b9c2d4; }
+
+/* ---------- 选择 & 批量工具栏 ---------- */
+.bulkbar {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+  border-radius: 11px;
+  font-size: 13px;
+  animation: rise .25s ease both;
+}
+.bulkbar.show { display: flex; }
+.bulkbar .sel-count { font-weight: 700; color: var(--primary-d); }
+.bulkbar .spacer { flex: 1; }
+.row-check {
+  width: 16px; height: 16px; accent-color: var(--primary);
+  cursor: pointer; flex: none; margin: 0;
+}
+.file-item.has-check, .task-item.has-check { display: flex; align-items: center; gap: 10px; }
+.file-item.has-check .fi-main, .task-item.has-check .task-main { flex: 1; min-width: 0; }
+
+.btn-danger {
+  background: var(--danger); border-color: var(--danger); color: #fff;
+}
+.btn-danger:hover { background: #cf3e34; box-shadow: 0 6px 14px rgba(226,72,61,.3); transform: translateY(-1px); }
+.btn-danger:active { transform: translateY(0); }
+
+/* ---------- 自定义确认弹框 ---------- */
+.modal-mask {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(15, 18, 28, .5);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none; transition: opacity .18s ease;
+}
+.modal-mask.show { opacity: 1; pointer-events: auto; }
+.modal {
+  width: min(360px, calc(100vw - 32px));
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 18px 14px;
+  box-shadow: var(--shadow-lg);
+  transform: translateY(10px) scale(.97);
+  transition: transform .18s ease;
+}
+.modal-mask.show .modal { transform: translateY(0) scale(1); }
+.modal-icon {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; flex: none;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+.modal-icon.info {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: var(--primary);
+}
+.modal-title { font-size: 15px; font-weight: 700; margin: 0; }
+.modal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.modal-text { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin: 0 0 14px; white-space: pre-line; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.modal-actions .btn { margin: 0; padding: 6px 14px; font-size: 13px; }

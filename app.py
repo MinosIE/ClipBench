@@ -510,22 +510,29 @@ def start_task(task_id, args, duration, workdir):
     t.start()
 
 
-def run_inpaint(src, out, x, y, w, h, radius, task_id):
+def run_inpaint(src, out, x, y, w, h, radius, task_id, quality="standard"):
     """后台执行 OpenCV inpaint 去字幕，并更新任务进度。
 
     内部使用互斥闸门，多个 inpaint 任务串行执行；排队期间任务状态显示为 'queued'。
+    quality: 'standard'(时序裸中值) / 'high'(时序+光流对齐)。
     """
-    from desub_inpaint import inpaint_video
+    from desub_inpaint import inpaint_video_temporal, inpaint_video
 
     inpaint_acquire(task_id)
     try:
-        _run_inpaint_impl(src, out, x, y, w, h, radius, task_id)
+        if quality == "high":
+            _run_inpaint_impl(src, out, x, y, w, h, radius, task_id,
+                              func=inpaint_video_temporal, use_flow=True)
+        else:
+            _run_inpaint_impl(src, out, x, y, w, h, radius, task_id,
+                              func=inpaint_video_temporal, use_flow=False)
     finally:
         inpaint_release()
 
 
-def _run_inpaint_impl(src, out, x, y, w, h, radius, task_id):
-    from desub_inpaint import inpaint_video
+def _run_inpaint_impl(src, out, x, y, w, h, radius, task_id, func=None, use_flow=False):
+    from desub_inpaint import inpaint_video_temporal
+    inpaint_video = func or inpaint_video_temporal
 
     # 拿到闸门后把状态切回 running
     if task_id in TASKS:
@@ -570,7 +577,7 @@ def _run_inpaint_impl(src, out, x, y, w, h, radius, task_id):
     save_tasks()
 
 
-def new_task(name, duration=0, output_name=None):
+def new_task(name, duration=0, output_name=None, extra=None):
     task_id = uuid.uuid4().hex[:12]
     TASKS[task_id] = {
         "task_id": task_id,
@@ -582,6 +589,8 @@ def new_task(name, duration=0, output_name=None):
         "output_name": output_name,
         "error": None,
     }
+    if extra:
+        TASKS[task_id].update(extra)
     save_tasks()
     return task_id
 
@@ -1109,14 +1118,20 @@ def api_desubtitle():
     if mode == "inpaint":
         # 内容感知修复：逐帧用 OpenCV inpaint 重建被遮盖区域（最接近无痕）
         radius = max(1, int(data.get("radius", 6) or 6))
+        quality = data.get("quality", "standard")
+        if quality not in ("standard", "high"):
+            quality = "standard"
         out = OUTPUT_DIR / f"desub_{src.stem}_{int(time.time())}{src.suffix}"
-        task_id = new_task(f"去字幕(智能修复) {w}x{h}@{x},{y}",
-                           duration=meta.get("duration", 0))
-        TASKS[task_id]["output_name"] = out.name
+        qlabel = "智能修复" if quality == "standard" else "智能修复(高质量)"
+        task_id = new_task(f"去字幕({qlabel}) {w}x{h}@{x},{y}",
+                           duration=meta.get("duration", 0),
+                           output_name=out.name,
+                           extra={"quality": quality})
         save_tasks()
         import threading
         threading.Thread(
-            target=run_inpaint, args=(str(src), str(out), x, y, w, h, radius, task_id),
+            target=run_inpaint,
+            args=(str(src), str(out), x, y, w, h, radius, task_id, quality),
             daemon=True,
         ).start()
         return jsonify({"task_id": task_id})
@@ -1240,6 +1255,65 @@ def api_delete_upload(file_id):
     if p.exists():
         p.unlink()
     return jsonify({"ok": True})
+
+
+@app.route("/api/delete_uploads", methods=["POST"])
+def api_delete_uploads():
+    """批量删除上传文件"""
+    data = request.json or {}
+    ids = data.get("file_ids", [])
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "请选择要删除的文件"}), 400
+    removed = []
+    for fid in ids:
+        p = UPLOAD_DIR / secure_filename(fid)
+        if p.exists() and p.is_file():
+            try:
+                p.unlink()
+                removed.append(fid)
+            except OSError:
+                pass
+    # 若当前选中的被删文件正好在删除列表，则清空当前选择
+    return jsonify({"ok": True, "removed": removed, "count": len(removed)})
+
+
+@app.route("/api/tasks/delete", methods=["POST"])
+def api_tasks_delete():
+    """批量删除任务（进行中的任务会被跳过）"""
+    data = request.json or {}
+    ids = data.get("task_ids", [])
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "请选择要删除的任务"}), 400
+    skipped = []
+    deleted = []
+    for task_id in ids:
+        task = TASKS.get(task_id)
+        if not task:
+            continue
+        if task.get("status") == "running":
+            skipped.append(task_id)
+            continue
+        out_name = task.get("output_name")
+        if out_name:
+            p = (OUTPUT_DIR / secure_filename(out_name))
+            if p.exists() and p.parent == OUTPUT_DIR:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+        out_dir = task.get("output_dir")
+        if out_dir:
+            d = Path(out_dir)
+            if d.exists() and str(d).startswith(str(OUTPUT_DIR)):
+                try:
+                    shutil.rmtree(d, ignore_errors=True)
+                except OSError:
+                    pass
+        TASKS.pop(task_id, None)
+        deleted.append(task_id)
+    save_tasks()
+    return jsonify({"ok": True, "deleted": deleted, "skipped": skipped,
+                    "count": len(deleted)})
 
 
 @app.route("/", defaults={"path": ""})

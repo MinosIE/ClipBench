@@ -33,6 +33,14 @@
         <h2>媒体文件</h2>
         <button class="btn-ghost" id="refresh-files" title="刷新">⟳</button>
       </div>
+      <div class="bulkbar" id="file-bulkbar">
+        <label class="row-select-all">
+          <input type="checkbox" id="file-select-all" /> 全选
+        </label>
+        <span class="sel-count" id="file-sel-count">已选 0 项</span>
+        <span class="spacer"></span>
+        <button class="btn btn-sm btn-danger" id="file-bulk-del">批量删除</button>
+      </div>
       <div id="file-list" class="file-list">
         <p class="empty">还没有文件，点击右上角上传。</p>
       </div>
@@ -352,6 +360,14 @@
                   <input type="range" id="desub-strength" min="6" max="50" step="1" value="25" />
                   <span id="desub-strength-val">25</span>
                 </div>
+                <div class="form-group" id="desub-quality-group" style="display:none">
+                  <label>修复质量</label>
+                  <div class="form-row">
+                    <label><input type="radio" name="desub-quality" value="standard" checked /> 标准（快，逐帧+邻帧）</label>
+                    <label><input type="radio" name="desub-quality" value="high" /> 高质量（慢，光流对齐，运动背景更连贯）</label>
+                  </div>
+                  <p class="hint">高质量会逐帧计算光流把前后帧对齐后再填充，复杂运动背景下字幕抹除痕迹更干净，但耗时为标准的 3~5 倍。</p>
+                </div>
                 <div class="form-group">
                   <label>字幕区域（像素，可手动微调；留空则用预览选区）</label>
                   <div class="coord-grid">
@@ -375,6 +391,14 @@
           <h2>任务队列</h2>
           <button class="btn-ghost" id="refresh-tasks" title="刷新">⟳</button>
         </div>
+        <div class="bulkbar" id="task-bulkbar">
+          <label class="row-select-all">
+            <input type="checkbox" id="task-select-all" /> 全选
+          </label>
+          <span class="sel-count" id="task-sel-count">已选 0 项</span>
+          <span class="spacer"></span>
+          <button class="btn btn-sm btn-danger" id="task-bulk-del">批量删除</button>
+        </div>
         <div id="task-list" class="task-list">
           <p class="empty">暂无任务。</p>
         </div>
@@ -383,6 +407,21 @@
   </main>
 
   <div id="toast" class="toast hidden"></div>
+
+  <!-- 自定义确认弹框 -->
+  <div class="modal-mask" id="modal-mask">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <div class="modal-icon" id="modal-icon">⚠️</div>
+        <h3 class="modal-title" id="modal-title">确认操作</h3>
+      </div>
+      <p class="modal-text" id="modal-text"></p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="modal-cancel">取消</button>
+        <button class="btn btn-danger" id="modal-confirm">删除</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/app.js"></script>
 </body>
