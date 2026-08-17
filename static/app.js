@@ -40,6 +40,7 @@ async function loadFiles() {
     const box = $("#file-list");
     if (!files.length) {
       box.innerHTML = '<p class="empty">还没有文件，点击右上角上传。</p>';
+      updateFileBulkbar();
       return;
     }
     box.innerHTML = "";
@@ -167,7 +168,12 @@ $("#file-bulk-del").addEventListener("click", async () => {
       $("#no-select").classList.remove("hidden");
     }
     toast(`已删除 ${r.count} 个文件`, "ok");
+    // 重置批量选择态，文件删光后工具栏会自动隐藏（loadFiles 重渲染并触发 updateFileBulkbar）
+    $("#file-select-all").checked = false;
     await loadFiles();
+    if (!$("#file-list").querySelector(".file-chk")) {
+      $("#file-bulkbar").classList.remove("show");
+    }
   } catch (e) {
     toast(e.message, "err");
   }
@@ -704,6 +710,194 @@ $$("[data-action]").forEach((btn) => {
 });
 
 // ---------- 任务队列 ----------
+// 状态文案与样式：新增 cancelled（手动/中断取消）与 failed 区分
+const TASK_ST_TEXT = {
+  running: "处理中", queued: "排队中", finished: "已完成",
+  done: "已完成", failed: "失败", cancelled: "已取消",
+};
+const TASK_RUNNING = (st) => st === "running" || st === "queued";
+
+// 渲染单个任务行（新增节点时用）
+function renderTaskRow(t) {
+  const el = document.createElement("div");
+  el.className = "task-item has-check";
+  el.dataset.id = t.task_id;
+  el.innerHTML = taskRowInner(t);
+  return el;
+}
+
+// 任务行内部 HTML。进度条始终存在，运行/排队时带 is-running 动画，
+// 这样增量更新时复用同一 progress-fill 元素，宽度变化可平滑过渡。
+function taskRowInner(t) {
+  const st = t.status;
+  const stText = TASK_ST_TEXT[st] || st;
+  const isRunning = TASK_RUNNING(st);
+  const pct = t.progress == null
+    ? (isRunning ? "" : "")
+    : ` · <span class="pct">${t.progress}%</span>`;
+  let actions = "";
+  if (isRunning || st === "finished" || st === "done" || st === "failed" || st === "cancelled") {
+    const dl = t.output_dir
+      ? `<a href="/api/download_dir/${t.task_id}">⬇ 下载全部 (ZIP)</a>`
+      : (t.output_name
+          ? `<a href="/api/download/${encodeURIComponent(t.output_name)}">⬇ 下载</a>`
+          : "");
+    const delLabel = isRunning ? "取消" : "🗑 删除";
+    actions = dl + `<a href="javascript:void(0)" class="task-del" data-id="${t.task_id}">${delLabel}</a>`;
+  }
+  // 进度条始终渲染：运行中/排队显示流动动画，其他状态静止
+  const width = t.progress == null ? (isRunning ? 8 : 0) : t.progress;
+  const prog = `<div class="progress-bar"><div class="progress-fill${isRunning ? " is-running" : ""}" style="width:${width}%"></div></div>`;
+  const elapsed = t.elapsed ? ` · 耗时 ${fmt_dur(t.elapsed)}` : "";
+  const submitAt = t.created_at ? fmt_time(t.created_at) : "";
+  return `
+    <input type="checkbox" class="row-check task-chk" />
+    <div class="task-main">
+      <div class="task-head">
+        <span class="task-name">${esc(t.name)}</span>
+        <span class="task-status status-${st}">${stText}${pct}${elapsed}</span>
+      </div>
+      <div class="task-meta">提交时间：${submitAt}</div>
+      ${prog}
+      ${actions ? `<div class="task-actions">${actions}</div>` : ""}
+      ${t.error ? `<div class="task-error">${esc(t.error)}</div>` : ""}
+    </div>`;
+}
+
+// ---- 进度平滑动画（速度外推）----
+// 后端 progress 节流落盘，且短任务几秒就跑完，前端轮询只能采样到
+// 稀疏的几个进度点。这里根据「最近两次后端进度的变化速率」在两次
+// 采样之间做匀速外推，进度条永远连续滚动；后端新值到达时自动校准。
+const _animState = new Map(); // task_id -> {display, lastPct, lastT, vel, rafId}
+
+function _applyProgressDisplay(tid, value) {
+  const el = document.querySelector(`.task-item[data-id="${tid}"] .progress-fill`);
+  const pctEl = document.querySelector(`.task-item[data-id="${tid}"] .pct`);
+  if (el) el.style.width = `${value}%`;
+  if (pctEl) pctEl.textContent = `${Math.round(value)}%`;
+}
+
+// 后端进度更新时调用：更新速度估计，确保 rAF 外推循环在跑
+function _onServerProgress(tid, pct) {
+  let st = _animState.get(tid);
+  const now = performance.now();
+  if (!st) {
+    st = { display: pct, lastPct: pct, lastT: now, vel: 0, rafId: null };
+    _animState.set(tid, st);
+  }
+  const dt = (now - st.lastT) / 1000;
+  if (dt > 0.05) {
+    // 估计速率（%/秒），限制在合理范围避免异常值
+    let v = (pct - st.lastPct) / dt;
+    if (v < 0) v = 0;
+    if (v > 60) v = 60;
+    // 指数平滑，避免抖动
+    st.vel = st.vel === 0 ? v : st.vel * 0.7 + v * 0.3;
+  }
+  st.lastPct = pct;
+  st.lastT = now;
+  // 到达终点直接到位
+  if (pct >= 100) {
+    st.display = 100;
+    _applyProgressDisplay(tid, 100);
+    if (st.rafId) { cancelAnimationFrame(st.rafId); st.rafId = null; }
+    return;
+  }
+  if (!st.rafId) {
+    st.rafId = requestAnimationFrame(() => _extrapolateTick(tid));
+  }
+}
+
+function _extrapolateTick(tid) {
+  const st = _animState.get(tid);
+  if (!st) return;
+  const now = performance.now();
+  const dt = (now - st.lastT) / 1000;
+  // 外推：display 以估计速率前进，同时向 lastPct 做轻微回拉校正
+  const extrapolated = st.lastPct + st.vel * dt;
+  // 朝外推值平滑移动
+  const lag = extrapolated - st.display;
+  st.display += lag * Math.min(1, dt * 8);
+  // 不超过 99.9（未完成前）
+  if (st.display > 99.9) st.display = 99.9;
+  if (st.display < st.lastPct) st.display = st.lastPct;
+  _applyProgressDisplay(tid, st.display);
+  st.rafId = requestAnimationFrame(() => _extrapolateTick(tid));
+}
+
+// 任务结束（完成/失败/取消）时停掉外推循环
+function _stopProgressAnim(tid) {
+  const st = _animState.get(tid);
+  if (st && st.rafId) { cancelAnimationFrame(st.rafId); st.rafId = null; }
+  _animState.delete(tid);
+}
+
+// 增量更新已有任务行：仅修改变化的文本/属性，保留 progress-fill 元素，
+// 进度用本地插值动画驱动，平滑变化不再“跳”。
+function updateTaskRow(el, t) {
+  const st = t.status;
+  const isRunning = TASK_RUNNING(st);
+  const target = t.progress == null ? (isRunning ? 8 : 0) : t.progress;
+  // 状态徽标（百分比文字由动画逐步填充，这里先占位）
+  const statusEl = el.querySelector(".task-status");
+  const pct = t.progress == null
+    ? (isRunning ? "" : "")
+    : ` · <span class="pct">${Math.round(target)}%</span>`;
+  const elapsed = t.elapsed ? ` · 耗时 ${fmt_dur(t.elapsed)}` : "";
+  const stText = TASK_ST_TEXT[st] || st;
+  statusEl.className = `task-status status-${st}`;
+  statusEl.innerHTML = `${stText}${pct}${elapsed}`;
+  // 进度条：交给速度外推动画平滑滚动
+  const fill = el.querySelector(".progress-fill");
+  if (fill) {
+    fill.classList.toggle("is-running", isRunning);
+    if (isRunning) {
+      _onServerProgress(t.task_id, target);
+    } else {
+      // 结束态：停外推，直接落到最终值
+      _stopProgressAnim(t.task_id);
+      fill.style.width = `${target}%`;
+    }
+  }
+  // 操作区 + 错误区
+  const actionsHtml = (() => {
+    if (isRunning || st === "finished" || st === "done" || st === "failed" || st === "cancelled") {
+      const dl = t.output_dir
+        ? `<a href="/api/download_dir/${t.task_id}">⬇ 下载全部 (ZIP)</a>`
+        : (t.output_name
+            ? `<a href="/api/download/${encodeURIComponent(t.output_name)}">⬇ 下载</a>`
+            : "");
+      const delLabel = isRunning ? "取消" : "🗑 删除";
+      return dl + `<a href="javascript:void(0)" class="task-del" data-id="${t.task_id}">${delLabel}</a>`;
+    }
+    return "";
+  })();
+  let actionsEl = el.querySelector(".task-actions");
+  if (actionsHtml) {
+    if (!actionsEl) {
+      actionsEl = document.createElement("div");
+      actionsEl.className = "task-actions";
+      el.querySelector(".task-main").appendChild(actionsEl);
+    }
+    actionsEl.innerHTML = actionsHtml;
+  } else if (actionsEl) {
+    actionsEl.remove();
+  }
+  const errEl = el.querySelector(".task-error");
+  if (t.error) {
+    if (!errEl) {
+      const d = document.createElement("div");
+      d.className = "task-error";
+      d.textContent = t.error;
+      el.querySelector(".task-main").appendChild(d);
+    } else {
+      errEl.textContent = t.error;
+    }
+  } else if (errEl) {
+    errEl.remove();
+  }
+}
+
 async function loadTasks() {
   try {
     const { tasks } = await api("/api/tasks");
@@ -712,45 +906,38 @@ async function loadTasks() {
       box.innerHTML = '<p class="empty">暂无任务。</p>';
       return;
     }
-    // 后端 /api/tasks 已按最新在前排序，直接渲染（新任务置顶）
-    const rows = tasks.map((t) => {
-      const st = t.status;
-      const stText = { running: "处理中", queued: "排队中", finished: "已完成", done: "已完成", failed: "失败" }[st] || st;
-      const pct = t.progress == null ? "" : ` · ${t.progress}%`;
-      const locked = st === "running" || st === "queued";
-      let actions = "";
-      if (st === "finished" || st === "done" || st === "failed") {
-        const dl = t.output_dir
-          ? `<a href="/api/download_dir/${t.task_id}">⬇ 下载全部 (ZIP)</a>`
-          : (t.output_name
-              ? `<a href="/api/download/${encodeURIComponent(t.output_name)}">⬇ 下载</a>`
-              : "");
-        actions = dl + `<a href="javascript:void(0)" class="task-del" data-id="${t.task_id}">🗑 删除</a>`;
+    // 清掉可能存在的空列表占位，避免残留
+    const placeholder = box.querySelector(".empty");
+    if (placeholder) placeholder.remove();
+    // 增量更新：复用已存在的节点，仅补齐/更新/移除，避免进度动画被打断
+    const existing = new Map();
+    box.querySelectorAll(".task-item").forEach((el) => existing.set(el.dataset.id, el));
+    const seen = new Set();
+    for (const t of tasks) {
+      seen.add(t.task_id);
+      let el = existing.get(t.task_id);
+      if (el) {
+        updateTaskRow(el, t);
+        existing.delete(t.task_id);
+      } else {
+        el = renderTaskRow(t);
+        box.appendChild(el);
+        // 新任务若正在运行，立即启动进度外推动画
+        if (TASK_RUNNING(t.status)) {
+          _onServerProgress(t.task_id, t.progress == null ? 8 : t.progress);
+        }
       }
-      const prog = t.progress == null
-        ? `<div class="progress-bar"><div class="progress-fill" style="width:100%"></div></div>`
-        : `<div class="progress-bar"><div class="progress-fill" style="width:${t.progress}%"></div></div>`;
-      const elapsed = t.elapsed ? ` · 耗时 ${fmt_dur(t.elapsed)}` : "";
-      const submitAt = t.created_at ? fmt_time(t.created_at) : "";
-      return `
-        <div class="task-item has-check${locked ? " locked" : ""}" data-id="${t.task_id}">
-          ${locked ? "" : '<input type="checkbox" class="row-check task-chk" />'}
-          <div class="task-main">
-            <div class="task-head">
-              <span class="task-name">${esc(t.name)}</span>
-              <span class="task-status status-${st}">${stText}${pct}${elapsed}</span>
-            </div>
-            <div class="task-meta">提交时间：${submitAt}</div>
-            ${(st === "running" || st === "queued") ? prog : ""}
-            ${actions ? `<div class="task-actions">${actions}</div>` : ""}
-            ${t.error ? `<div class="task-error">${esc(t.error)}</div>` : ""}
-          </div>
-        </div>`;
+    }
+    // 移除已不存在的任务
+    existing.forEach((el) => {
+      _stopProgressAnim(el.dataset.id);
+      el.remove();
     });
-    box.innerHTML = rows.join("");
-    $$("#task-list .task-chk").forEach((c) => {
-      c.addEventListener("change", updateTaskBulkbar);
-    });
+    // 按后端顺序（最新在前）重排，保持 DOM 顺序与数据一致
+    for (const t of tasks) {
+      const el = box.querySelector(`.task-item[data-id="${t.task_id}"]`);
+      if (el) box.appendChild(el);
+    }
     updateTaskBulkbar();
   } catch (e) {
     // ignore
@@ -801,7 +988,7 @@ $("#task-bulk-del").addEventListener("click", async () => {
   }
   const ok = await showConfirm({
     title: "批量删除任务",
-    text: `确定删除选中的 ${ids.length} 个任务？\n其输出文件会被一并删除，正在处理的任务不会被删除。`,
+    text: `确定删除选中的 ${ids.length} 个任务？\n其输出文件会被一并删除，处理中的任务将被强制取消。`,
   });
   if (!ok) return;
   try {
@@ -810,12 +997,11 @@ $("#task-bulk-del").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ task_ids: ids }),
     });
-    if (r.skipped && r.skipped.length) {
-      toast(`已删除 ${r.count} 个，跳过 ${r.skipped.length} 个进行中任务`, "ok");
-    } else {
-      toast(`已删除 ${r.count} 个任务`, "ok");
-    }
+    toast(`已删除 ${r.count} 个任务`, "ok");
     await loadTasks();
+    if (!$("#task-list").querySelector(".task-chk")) {
+      $("#task-bulkbar").classList.remove("show");
+    }
   } catch (e) {
     toast(e.message, "err");
   }
@@ -834,7 +1020,8 @@ function startPolling() {
     const { tasks } = await api("/api/tasks").catch(() => ({ tasks: [] }));
     const anyRunning = tasks.some((t) => t.status === "running" || t.status === "queued");
     if (anyRunning) {
-      setTimeout(tick, 1500);
+      // 较频繁地轮询，使进度条平滑过渡而非大步跳变
+      setTimeout(tick, 600);
     } else {
       polling = false;
     }

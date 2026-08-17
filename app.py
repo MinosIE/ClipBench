@@ -94,6 +94,94 @@ def load_tasks():
             pass
 
 
+# ---------------- 孤儿任务巡检 ----------------
+# 场景：服务重启后，磁盘上 tasks.json 里残留的 "running" 任务并没有对应线程在跑，
+# 进度永远停在 0%、且前端不允许删除（防误删正在运行的任务）。
+# 解法：启动时 + 每 60s，把任何残留的 "running"/"queued" 标记为 "failed" 并附原因，
+# 这样用户在前端就能正常勾选删除。后台线程通过 Thread 句柄的 is_alive() 持续跟踪，
+# 进程内任务有真实线程在跑则不会被误杀。
+import threading as _thr
+
+_TASKS_LOCK = _thr.Lock()
+_ACTIVE_THREADS: dict = {}  # task_id -> Thread
+_TASK_PROCS: dict = {}  # task_id -> subprocess.Popen（运行中的 ffmpeg 句柄）
+
+
+def register_task_thread(task_id: str, thread: _thr.Thread) -> None:
+    _ACTIVE_THREADS[task_id] = thread
+
+
+def register_task_proc(task_id: str, proc) -> None:
+    _TASK_PROCS[task_id] = proc
+
+
+def cancel_task(task_id: str) -> bool:
+    """强制取消一个运行中的任务：终止其 ffmpeg 子进程并标记 cancelled。
+
+    返回 True 表示成功触发取消（或任务本就不在运行）。
+    """
+    with _TASKS_LOCK:
+        t = TASKS.get(task_id)
+        if t is None:
+            return False
+        if t.get("status") not in ("running", "queued"):
+            return True  # 非运行态，直接删除即可
+        proc = _TASK_PROCS.get(task_id)
+        if proc is not None:
+            try:
+                proc.terminate()
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            _TASK_PROCS.pop(task_id, None)
+        _ACTIVE_THREADS.pop(task_id, None)
+        t["status"] = "cancelled"
+        t["error"] = "任务已被手动取消。"
+        t["finished_at"] = int(time.time())
+        save_tasks()
+    return True
+
+
+def sweep_orphan_tasks() -> int:
+    """清理没有真实线程在跑的 running/queued 任务，返回处理数。
+
+    这些多半是服务重启/崩溃后残留的孤儿任务，把状态置为 cancelled
+    （可删除、可重试），而不是 failed（避免与真实失败混淆）。
+    """
+    n = 0
+    with _TASKS_LOCK:
+        for tid, t in list(TASKS.items()):
+            if t.get("status") not in ("running", "queued"):
+                continue
+            th = _ACTIVE_THREADS.get(tid)
+            if th is not None and th.is_alive():
+                continue
+            # 进程中已无对应线程在跑 -> 视为孤儿，标记为可取消状态
+            t["status"] = "cancelled"
+            t["error"] = "任务已中断（可删除后重试）。"
+            t["finished_at"] = int(time.time())
+            n += 1
+        if n:
+            save_tasks()
+    return n
+
+
+def _sweep_loop():
+    while True:
+        try:
+            sweep_orphan_tasks()
+        except Exception:
+            pass
+        time.sleep(60)
+
+
+_thr.Thread(target=_sweep_loop, daemon=True).start()
+# 启动时立即执行一次，清理残留的孤儿任务
+sweep_orphan_tasks()
+
+
 def save_tasks():
     try:
         TASKS_FILE.write_text(
@@ -295,6 +383,7 @@ def run_ffmpeg(args, task_id, workdir):
             text=True,
             bufsize=1,
         )
+        register_task_proc(task_id, proc)
     except Exception as e:
         task["status"] = "failed"
         task["error"] = str(e)
@@ -507,6 +596,7 @@ def start_task(task_id, args, duration, workdir):
     t = threading.Thread(
         target=run_ffmpeg, args=(args, task_id, workdir), daemon=True
     )
+    register_task_thread(task_id, t)
     t.start()
 
 
@@ -540,15 +630,16 @@ def _run_inpaint_impl(src, out, x, y, w, h, radius, task_id, func=None, use_flow
         save_tasks()
 
     last_saved = 0.0
-    PROGRESS_EVERY = 0.5  # 秒：进度节流，避免每帧写盘
+    PROGRESS_EVERY = 0.2  # 秒：进度节流，避免每帧写盘
 
     def _on_progress(done, total, elapsed):
         nonlocal last_saved
         now = time.time()
-        # 节流：每 0.5s 才落盘一次；以及完成/失败时强制落盘
+        # 节流：每 0.2s 才落盘一次；以及完成/失败时强制落盘
         if (now - last_saved) >= PROGRESS_EVERY or done == total:
             if total and total > 0:
-                pct = max(0, min(100, int(done * 100 / total)))
+                # 用浮点(1位小数)进度，前端插值动画可更细腻地衔接
+                pct = max(0.0, min(100.0, round(done * 100 / total, 1)))
             else:
                 # 没有总帧数时，按 elapsed 推一个下限百分比，1s 走 1%，最多 99
                 pct = max(0, min(99, int(elapsed)))
@@ -1193,12 +1284,13 @@ def api_task(task_id):
 
 @app.route("/api/task/<task_id>/delete", methods=["POST"])
 def api_task_delete(task_id):
-    """删除已完成/失败的任务记录，可选一并删除输出文件。"""
+    """删除任务记录，可选一并删除输出文件。运行中的任务会先被强制取消。"""
     task = TASKS.get(task_id)
     if not task:
         return jsonify({"error": "任务不存在"}), 404
-    if task.get("status") == "running":
-        return jsonify({"error": "任务进行中，无法删除"}), 400
+    # 进行中/排队的任务：先强制取消其 ffmpeg 子进程，再删除
+    if task.get("status") in ("running", "queued"):
+        cancel_task(task_id)
     # 删除输出文件（仅限 outputs 目录内，防越权）
     out_name = task.get("output_name")
     if out_name:
@@ -1251,8 +1343,10 @@ def api_download_dir(task_id):
 
 @app.route("/api/delete_upload/<file_id>", methods=["POST"])
 def api_delete_upload(file_id):
-    p = UPLOAD_DIR / secure_filename(file_id)
-    if p.exists():
+    # file_id 来自可信的 api/files 列表，直接用 base 名拼接并防目录穿越
+    name = os.path.basename(file_id)
+    p = UPLOAD_DIR / name
+    if p.exists() and p.parent == UPLOAD_DIR:
         p.unlink()
     return jsonify({"ok": True})
 
@@ -1266,8 +1360,9 @@ def api_delete_uploads():
         return jsonify({"error": "请选择要删除的文件"}), 400
     removed = []
     for fid in ids:
-        p = UPLOAD_DIR / secure_filename(fid)
-        if p.exists() and p.is_file():
+        name = os.path.basename(fid)
+        p = UPLOAD_DIR / name
+        if p.exists() and p.is_file() and p.parent == UPLOAD_DIR:
             try:
                 p.unlink()
                 removed.append(fid)
@@ -1279,20 +1374,19 @@ def api_delete_uploads():
 
 @app.route("/api/tasks/delete", methods=["POST"])
 def api_tasks_delete():
-    """批量删除任务（进行中的任务会被跳过）"""
+    """批量删除任务。运行中的任务会先被强制取消，再删除。"""
     data = request.json or {}
     ids = data.get("task_ids", [])
     if not isinstance(ids, list) or not ids:
         return jsonify({"error": "请选择要删除的任务"}), 400
-    skipped = []
     deleted = []
     for task_id in ids:
         task = TASKS.get(task_id)
         if not task:
             continue
-        if task.get("status") == "running":
-            skipped.append(task_id)
-            continue
+        # 进行中/排队的任务：先强制取消，再删除
+        if task.get("status") in ("running", "queued"):
+            cancel_task(task_id)
         out_name = task.get("output_name")
         if out_name:
             p = (OUTPUT_DIR / secure_filename(out_name))
@@ -1312,8 +1406,7 @@ def api_tasks_delete():
         TASKS.pop(task_id, None)
         deleted.append(task_id)
     save_tasks()
-    return jsonify({"ok": True, "deleted": deleted, "skipped": skipped,
-                    "count": len(deleted)})
+    return jsonify({"ok": True, "deleted": deleted, "count": len(deleted)})
 
 
 @app.route("/", defaults={"path": ""})
@@ -1322,7 +1415,18 @@ def serve_static(path):
     full = STATIC_DIR / path
     if path and full.exists() and full.is_file():
         return send_from_directory(str(STATIC_DIR), path)
-    return send_from_directory(str(STATIC_DIR), "index.html")
+    # 返回 index.html 时，自动给静态资源引用追加基于文件修改时间的时间戳，
+    # 任何改动 CSS/JS 都会自动 bust 浏览器缓存，无需手动维护版本号。
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    def _ver(ref):
+        fp = STATIC_DIR / ref.lstrip("/")
+        ts = int(fp.stat().st_mtime) if fp.exists() else 0
+        return f"{ref}?v={ts}"
+    html = re.sub(r'(href|src)="(/style\.css)(?:\?v=\d+)?"',
+                  lambda m: f'{m.group(1)}="{_ver("/style.css")}"', html)
+    html = re.sub(r'(href|src)="(/app\.js)(?:\?v=\d+)?"',
+                  lambda m: f'{m.group(1)}="{_ver("/app.js")}"', html)
+    return Response(html, mimetype="text/html")
 
 
 if __name__ == "__main__":

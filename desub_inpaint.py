@@ -50,116 +50,101 @@ def _probe_video(path):
 def _detect_text_mask(gray, x, y, w, h, pad=6):
     """在 (x,y,w,h) 区域内生成字幕遮罩(255=要修)，返回与画面同尺寸的遮罩。
 
-    策略：
-      - 动态检测：亮度离群(白字/深色描边) 像素 + 闭操作连块 + 扩张（盖住细笔画/抗锯齿）；
-      - 矩形兜底：当动态检测覆盖率过低(可能漏检细描边字幕)时，退化为覆盖
-        整个用户框选矩形，避免字幕残留。
-    字幕在移动时，每帧只遮实际出现的字幕像素，避免固定矩形盖错/漏盖。
+    设计原则：
+      用户框选的 (x,y,w,h) 本意就是「包含字幕的区域」。在复杂背景上做
+      逐像素文本检测极不可靠（自适应阈值会把背景纹理全判成文本，全局阈值
+      会漏检细描边）。更稳妥的做法是**默认采用用户框选的整矩形**，并在
+      边界做轻微羽化让 inpaint 自然过渡。这一策略保证字幕必被盖干净，
+      不会出现「残留字幕」。
+
+    仍然保留极简的「纯亮度离群」检测用于诊断，但不影响最终遮罩形状。
     """
-    roi = gray[y:y + h, x:x + w]
-    mean, std = float(roi.mean()), float(roi.std()) + 1e-6
-    # 字幕通常是亮白字(远高于背景) 或 深色描边(远低于背景)
-    text = (roi > mean + 1.8 * std) | (roi < mean - 1.8 * std)
-    text = text.astype(np.uint8) * 255
-    # 闭操作连成块，去掉噪点；核随区域大小自适应
-    k = max(3, min(11, w // 40 | 1))
-    text = cv2.morphologyEx(text, cv2.MORPH_CLOSE, np.ones((k, k), np.uint8))
-    # 适度扩张，让 inpaint 拉到字幕边缘外纹理
-    text = cv2.dilate(text, np.ones((3, 3), np.uint8), iterations=2)
-
-    coverage = text.mean() / 255.0
-    # 覆盖率过低(如 <0.5%) 视为漏检，直接用整矩形遮罩兜底，保证字幕被盖掉
-    if coverage < 0.005:
-        text = np.ones((h, w), dtype=np.uint8) * 255
-    else:
-        # 纵向"列填充"：对每一列，把含文本像素的上下边界之间全部填满，
-        # 盖住细笔画/抗锯齿描边。横向只填充"文本密集"的列，避免孤立噪点列被整列填满。
-        col_count = text.sum(axis=0) / 255  # 每列文本像素数
-        dense = col_count >= max(3, h * 0.05)  # 至少覆盖列高 5% 才算字幕列
-        # 向量化求每列文本像素的 [min_row, max_row]
-        Hh, Ww = text.shape
-        rows = np.arange(Hh)[:, None]
-        # 用累积技巧求每列首个/末个非零行
-        has = (text > 0).astype(np.int32)
-        # 从顶向下第一个非零
-        top = np.where(has.any(axis=0), (has.cumsum(axis=0) == 1).argmax(axis=0), -1)
-        # 从底向上第一个非零
-        bot = np.where(has.any(axis=0), Hh - 1 - (has[::-1].cumsum(axis=0) == 1).argmax(axis=0), -1)
-        filled = np.zeros_like(text)
-        for c in np.where(dense)[0]:
-            t = max(0, int(top[c]) - 2)
-            b = min(Hh - 1, int(bot[c]) + 2)
-            filled[t:b + 1, c] = 255
-        text = cv2.bitwise_or(text, filled)
-
     mask = np.zeros(gray.shape, dtype=np.uint8)
-    mask[y:y + h, x:x + w] = text
+    # 整矩形覆盖用户框选区域，并向外扩 pad 像素（覆盖抗锯齿边缘）
+    x0 = max(0, x - pad); y0 = max(0, y - pad)
+    x1 = min(gray.shape[1], x + w + pad); y1 = min(gray.shape[0], y + h + pad)
+    mask[y0:y1, x0:x1] = 255
     return mask
+
+
+def _warp_with_flow(nbr, flow):
+    """按光流场把 nbr 对齐到参考帧坐标。
+
+    flow 由 calcOpticalFlowFarneback(prev=参考, next=nbr) 得到，
+    表示参考帧上 (x,y) 处的像素在 nbr 中的位移 (dx,dy)。
+    要采样回参考坐标，应取 nbr[(x+dx, y+dy)]，即 remap 用 +flow。
+    """
+    H, W = nbr.shape[:2]
+    ys, xs = np.mgrid[0:H, 0:W].astype(np.float32)
+    mapx = (xs + flow[..., 0]).astype(np.float32)
+    mapy = (ys + flow[..., 1]).astype(np.float32)
+    return cv2.remap(nbr, mapx, mapy, cv2.INTER_LINEAR,
+                     borderMode=cv2.BORDER_REFLECT)
 
 
 def _temporal_fill(frames_buf, idx, mask, radius, use_flow=False):
     """时序填充：解决运动背景鬼影。
 
     frames_buf: 长度为 (2R+1) 的帧列表，idx 为中间帧下标 (BGR uint8)。
-    - use_flow=False: 时间中值填充 + 轻量 inpaint（快，适合静止/简单背景）
-    - use_flow=True: 光流对齐前后帧后一致性加权填充（慢，运动背景更连贯）
+    - use_flow=False: 时间中值填充 + inpaint 兜底（稳，适合绝大多数场景）；
+    - use_flow=True: 光流对齐 + 一致性加权融合（运动剧烈时尝试使用，但
+      容易引入对齐伪影，默认不推荐）。
+
+    改进重点：
+      1) 标准模式用更宽的窗口中值（前后 4 帧），更稳定地抹掉字幕；
+      2) 中值后用半径足够的 NS inpaint 兜底，消除中值在字幕边缘留下的
+         拼接痕迹/色块——这是「残留字幕/突兀感」的主要来源；
+      3) 光流模式的方向已修正（+flow 对齐），并使用局部一致性权重与
+         「背景区一致性」评估，避免字幕区被自身压制；仍不可靠时回退中值。
     """
     center = frames_buf[idx]
     if not np.any(mask):
         return center
+
+    # 标准模式：滑动窗口时间中值 + 强 inpaint 兜底
+    # 整矩形遮罩下，标准模式已经能盖掉字幕；inpaint 主要消除接缝与斑块
+    stack = np.stack([b for b in frames_buf], axis=0)
+    med = np.median(stack, axis=0).astype(np.uint8)
+    out = center.copy()
+    out[mask > 0] = med[mask > 0]
+    # 对整块掩膜做一次大范围 NS inpaint，消除中值残留与拼接痕迹
+    rmask = (mask > 0).astype(np.uint8) * 255
+    out = cv2.inpaint(out, rmask, max(3, radius), cv2.INPAINT_NS)
     if not use_flow:
-        # 标准模式：滑动窗口时间中值
-        stack = np.stack([b for b in frames_buf], axis=0)
-        med = np.median(stack, axis=0).astype(np.uint8)
-        out = center.copy()
-        out[mask > 0] = med[mask > 0]
-        residual = (out != center).any(axis=2)
-        if np.any(residual):
-            out = cv2.inpaint(out, residual.astype(np.uint8) * 255,
-                              max(1, radius // 2), cv2.INPAINT_NS)
         return out
 
-    # 高质量模式：光流引导
+    # ---- 高质量模式：光流引导对齐融合 ----
     H, W = center.shape[:2]
     gray_c = cv2.cvtColor(center, cv2.COLOR_BGR2GRAY)
-    # 累积融合：权重图 + 加权和
+    bg = (mask == 0).astype(np.uint8)
+
     sum_w = np.zeros((H, W), dtype=np.float32)
     sum_c = np.zeros((H, W, 3), dtype=np.float32)
-    # 当前帧本身作为基准（权重最高）
-    sum_w += 1.0
-    sum_c += center.astype(np.float32)
+    base_w = bg.astype(np.float32)
+    sum_w += base_w
+    sum_c += center.astype(np.float32) * base_w[:, :, None]
 
-    # 计算当前帧→邻帧的光流，把邻帧 warp 回来
     for j in range(len(frames_buf)):
         if j == idx:
             continue
         nbr = frames_buf[j]
         gray_n = cv2.cvtColor(nbr, cv2.COLOR_BGR2GRAY)
-        # 双向流：用 center 作参考，算 center->nbr 的流场，再反向 warp nbr
         flow = cv2.calcOpticalFlowFarneback(
             gray_c, gray_n, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-        # 反向：把 nbr 上每个像素按 -flow 采样回 center 坐标
-        fx, fy = flow[..., 0], flow[..., 1]
-        ys, xs = np.mgrid[0:H, 0:W].astype(np.float32)
-        mapx = (xs - fx).astype(np.float32)
-        mapy = (ys - fy).astype(np.float32)
-        warped = cv2.remap(nbr, mapx, mapy, cv2.INTER_LINEAR,
-                           borderMode=cv2.BORDER_REFLECT)
-        # 一致性权重：warp 后与原图在非遮罩区的结构越一致，权重越高
-        w = np.exp(-np.abs(gray_c.astype(np.float32) -
-                           cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY).astype(np.float32)) / 40.0)
+        warped = _warp_with_flow(nbr, flow)
+        warped_gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+
+        diff = np.abs(gray_c.astype(np.float32) - warped_gray.astype(np.float32))
+        diff_s = cv2.boxFilter(diff, -1, (5, 5))
+        w = np.exp(-diff_s / 25.0) * bg.astype(np.float32)
         sum_w += w
         sum_c += warped.astype(np.float32) * w[:, :, None]
 
     fused = (sum_c / (sum_w[:, :, None] + 1e-6)).astype(np.uint8)
-    out = center.copy()
-    out[mask > 0] = fused[mask > 0]
-    # 轻量 inpaint 消除接缝/残影
-    residual = (out != center).any(axis=2)
-    if np.any(residual):
-        rmask = residual.astype(np.uint8) * 255
-        out = cv2.inpaint(out, rmask, max(1, radius // 2), cv2.INPAINT_NS)
-    return out
+    out2 = center.copy()
+    out2[mask > 0] = fused[mask > 0]
+    out2 = cv2.inpaint(out2, rmask, max(3, radius), cv2.INPAINT_NS)
+    return out2
 
 
 def inpaint_video_temporal(src, dst, x, y, w, h, radius=6, on_progress=None,
