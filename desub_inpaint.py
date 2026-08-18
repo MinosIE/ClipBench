@@ -47,23 +47,52 @@ def _probe_video(path):
     return w, h, info.get("r_frame_rate", "30"), total
 
 
-def _detect_text_mask(gray, x, y, w, h, pad=6):
-    """在 (x,y,w,h) 区域内生成字幕遮罩(255=要修)，返回与画面同尺寸的遮罩。
+def _detect_text_mask(gray, x, y, w, h, pad=4, bright_thr=205, dilate=11,
+                      dark_thr=45, dark_dilate=4, min_area=0):
+    """在用户框选矩形 (x,y,w,h) 内**自适应检测字幕像素**，返回全图遮罩(255=要修)。
 
-    设计原则：
-      用户框选的 (x,y,w,h) 本意就是「包含字幕的区域」。在复杂背景上做
-      逐像素文本检测极不可靠（自适应阈值会把背景纹理全判成文本，全局阈值
-      会漏检细描边）。更稳妥的做法是**默认采用用户框选的整矩形**，并在
-      边界做轻微羽化让 inpaint 自然过渡。这一策略保证字幕必被盖干净，
-      不会出现「残留字幕」。
+    为什么不再用整矩形遮罩：
+      字幕通常只占框选区域里的一两行，而框选区域（常为底部 1/3）内同时存在
+      大量真实背景（水面波纹、船体、暗色块）。整矩形把背景也一并 inpaint，
+      既会破坏背景纹理，又会在「字幕占满整行/多行」时因时间中值取不到干净
+      背景而残留白字/暗描边。
 
-    仍然保留极简的「纯亮度离群」检测用于诊断，但不影响最终遮罩形状。
+    新策略：**只遮罩真正的字幕像素**：
+      1) 在框选范围内检测亮（白）像素 -> 膨胀 dilate 覆盖抗锯齿与细描边；
+      2) 同时检测暗像素（黑描边/阴影），膨胀后并入，避免字幕边缘残留暗框；
+      3) 两路都做连通域面积过滤（min_area），去掉水面反光/孤立噪点这类
+         小亮斑，避免把它们误当字幕、修出突兀亮块；
+      4) 其余背景像素一律保留，inpaint 用周围真实背景纹理自然重建。
+    检测范围被严格限制在 (x,y,w,h) 内，不会误删画面上其他白色内容。
     """
-    mask = np.zeros(gray.shape, dtype=np.uint8)
-    # 整矩形覆盖用户框选区域，并向外扩 pad 像素（覆盖抗锯齿边缘）
-    x0 = max(0, x - pad); y0 = max(0, y - pad)
-    x1 = min(gray.shape[1], x + w + pad); y1 = min(gray.shape[0], y + h + pad)
-    mask[y0:y1, x0:x1] = 255
+    H, W = gray.shape
+    x0 = max(0, x); y0 = max(0, y)
+    x1 = min(W, x + w); y1 = min(H, y + h)
+    mask = np.zeros((H, W), dtype=np.uint8)
+    if x1 <= x0 or y1 <= y0:
+        return mask
+    sub = gray[y0:y1, x0:x1]
+    # 白字幕
+    bin_b = (sub > bright_thr).astype(np.uint8) * 255
+    # 黑描边 / 阴影（字幕常带深色描边）
+    bin_d = (sub < dark_thr).astype(np.uint8) * 255
+    # 连通域面积过滤：去掉小亮斑/噪点（水面反光）
+    if min_area > 0:
+        nb, labs, stats, _ = cv2.connectedComponentsWithStats(bin_b, 8)
+        for i in range(1, nb):
+            if stats[i, cv2.CC_STAT_AREA] < min_area:
+                bin_b[labs == i] = 0
+        nd, labd, statd, _ = cv2.connectedComponentsWithStats(bin_d, 8)
+        for i in range(1, nd):
+            if statd[i, cv2.CC_STAT_AREA] < min_area:
+                bin_d[labd == i] = 0
+    # 膨胀：覆盖抗锯齿半透明边缘
+    kb = cv2.getStructuringElement(cv2.MORPH_RECT, (dilate, dilate))
+    bd = cv2.getStructuringElement(cv2.MORPH_RECT, (dark_dilate, dark_dilate))
+    bin_b = cv2.dilate(bin_b, kb)
+    bin_d = cv2.dilate(bin_d, bd)
+    region = cv2.bitwise_or(bin_b, bin_d)
+    mask[y0:y1, x0:x1] = region
     return mask
 
 
@@ -83,37 +112,37 @@ def _warp_with_flow(nbr, flow):
 
 
 def _temporal_fill(frames_buf, idx, mask, radius, use_flow=False):
-    """时序填充：解决运动背景鬼影。
+    """时序填充：解决运动背景鬼影 + 残留字幕。
 
     frames_buf: 长度为 (2R+1) 的帧列表，idx 为中间帧下标 (BGR uint8)。
-    - use_flow=False: 时间中值填充 + inpaint 兜底（稳，适合绝大多数场景）；
-    - use_flow=True: 光流对齐 + 一致性加权融合（运动剧烈时尝试使用，但
-      容易引入对齐伪影，默认不推荐）。
+    mask: 由 _detect_text_mask 生成的**精确字幕遮罩**(255=要修)。
 
-    改进重点：
-      1) 标准模式用更宽的窗口中值（前后 4 帧），更稳定地抹掉字幕；
-      2) 中值后用半径足够的 NS inpaint 兜底，消除中值在字幕边缘留下的
-         拼接痕迹/色块——这是「残留字幕/突兀感」的主要来源；
-      3) 光流模式的方向已修正（+flow 对齐），并使用局部一致性权重与
-         「背景区一致性」评估，避免字幕区被自身压制；仍不可靠时回退中值。
+    标准模式（use_flow=False，默认）：
+      1) 用滑动窗口（前后各 R 帧）的时间中值作为填充源——选取邻帧同一
+         位置的非字幕背景像素，纹理来自真实帧，最自然；
+      2) 把中值填入遮罩区域，再用半径足够的 NS inpaint 兜底，消除中值在
+         字幕边缘留下的拼接痕迹/色块；
+      3) 背景像素（mask==0）原样保留，不被破坏。
+
+    高质量模式（use_flow=True）：
+      光流对齐邻帧后再做一致性加权融合，运动剧烈时背景更连贯，但慢且易
+      引入对齐伪影，故默认不推荐；此处在精确遮罩上同样只对字幕区动刀。
     """
     center = frames_buf[idx]
     if not np.any(mask):
         return center
+    rmask = (mask > 0).astype(np.uint8) * 255
 
     # 标准模式：滑动窗口时间中值 + 强 inpaint 兜底
-    # 整矩形遮罩下，标准模式已经能盖掉字幕；inpaint 主要消除接缝与斑块
     stack = np.stack([b for b in frames_buf], axis=0)
     med = np.median(stack, axis=0).astype(np.uint8)
     out = center.copy()
     out[mask > 0] = med[mask > 0]
-    # 对整块掩膜做一次大范围 NS inpaint，消除中值残留与拼接痕迹
-    rmask = (mask > 0).astype(np.uint8) * 255
     out = cv2.inpaint(out, rmask, max(3, radius), cv2.INPAINT_NS)
     if not use_flow:
         return out
 
-    # ---- 高质量模式：光流引导对齐融合 ----
+    # ---- 高质量模式：光流引导对齐融合（仅对字幕区）----
     H, W = center.shape[:2]
     gray_c = cv2.cvtColor(center, cv2.COLOR_BGR2GRAY)
     bg = (mask == 0).astype(np.uint8)
@@ -196,14 +225,10 @@ def inpaint_video_temporal(src, dst, x, y, w, h, radius=6, on_progress=None,
             mask = _detect_text_mask(gray, x, y, w, h)
             buf.append((frame, mask))
             if len(buf) <= 2 * R:
-                # 窗口未填满前：用已有帧中值(退化) + 单帧 inpaint
-                frames = [b[0] for b in buf]
+                # 窗口未填满前：对精确字幕遮罩做单帧 inpaint 兜底
                 m = buf[-1][1]
                 if np.any(m):
-                    med = np.median(np.stack(frames, axis=0), axis=0).astype(np.uint8)
-                    out = frame.copy()
-                    out[m > 0] = med[m > 0]
-                    out = cv2.inpaint(out, m, radius, cv2.INPAINT_NS)
+                    out = cv2.inpaint(frame, m, radius, cv2.INPAINT_NS)
                 else:
                     out = frame
             else:

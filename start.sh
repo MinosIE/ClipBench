@@ -25,6 +25,17 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
   fi
 fi
 
+# 前端构建：用 pnpm 安装 Solid+Vite 依赖并构建到 dist/
+if command -v pnpm >/dev/null 2>&1; then
+  echo "📦 安装前端依赖 (pnpm)..."
+  pnpm install --prefer-offline
+  echo "🔨 构建前端 (vite build)..."
+  pnpm run build
+else
+  echo "⚠️  未检测到 pnpm，跳过前端构建（将使用 static/ 旧前端）"
+  echo "    安装 pnpm: npm i -g pnpm"
+fi
+
 echo "🚀 启动服务..."
-PORT="${PORT:-5000}"
+PORT="${PORT:-8080}"
 PORT=$PORT python app.py

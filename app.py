@@ -30,6 +30,7 @@ BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "outputs"
 STATIC_DIR = BASE_DIR / "static"
+DIST_DIR = BASE_DIR / "dist"  # Vite 构建产物（Solid 前端）
 
 for d in (UPLOAD_DIR, OUTPUT_DIR, STATIC_DIR):
     d.mkdir(exist_ok=True)
@@ -182,6 +183,18 @@ _thr.Thread(target=_sweep_loop, daemon=True).start()
 sweep_orphan_tasks()
 
 
+# SSE 推送：save_tasks 时通知订阅者，由泵线程节流后推送最新 TASKS
+_SSE_COND = _thr.Condition()
+_SSE_DIRTY = False
+
+
+def _notify_tasks_changed():
+    global _SSE_DIRTY
+    with _SSE_COND:
+        _SSE_DIRTY = True
+        _SSE_COND.notify_all()
+
+
 def save_tasks():
     try:
         TASKS_FILE.write_text(
@@ -189,6 +202,36 @@ def save_tasks():
         )
     except Exception:
         pass
+    # 触发 SSE 推送（前端实时进度，无需轮询）
+    _notify_tasks_changed()
+
+
+def _sse_pump():
+    """SSE 泵：等待变更通知，节流后把最新 TASKS 推给所有订阅者。"""
+    global _SSE_DIRTY
+    while True:
+        with _SSE_COND:
+            _SSE_COND.wait(timeout=0.5)
+            dirty = _SSE_DIRTY
+            _SSE_DIRTY = False
+        if not dirty:
+            continue
+        # 节流：两次推送至少间隔 0.25s，避免进度高频更新刷爆连接
+        payload = json.dumps(
+            sorted(TASKS.values(), key=lambda t: t.get("created_at", 0), reverse=True),
+            ensure_ascii=False,
+        )
+        # 注意：消费者慢导致队列满时，只丢弃当前帧，绝不移除订阅者，
+        # 否则慢客户端（如 curl 缓冲）会被永久踢出，再也收不到推送。
+        for q in list(_SSE_SUBSCRIBERS):
+            try:
+                q.put_nowait(payload)
+            except Exception:
+                pass
+
+
+_SSE_SUBSCRIBERS = set()
+_thr.Thread(target=_sse_pump, daemon=True).start()
 
 
 load_tasks()
@@ -607,6 +650,9 @@ def run_inpaint(src, out, x, y, w, h, radius, task_id, quality="standard"):
     quality: 'standard'(时序裸中值) / 'high'(时序+光流对齐)。
     """
     from desub_inpaint import inpaint_video_temporal, inpaint_video
+
+    # 注册当前线程，避免被 sweep_orphan_tasks 误判为孤儿任务而中断
+    register_task_thread(task_id, threading.current_thread())
 
     inpaint_acquire(task_id)
     try:
@@ -1274,6 +1320,43 @@ def api_tasks():
     return jsonify({"tasks": tasks})
 
 
+@app.route("/api/tasks/stream")
+def api_tasks_stream():
+    """SSE 端点：实时推送任务列表变更，替代前端轮询。"""
+    import queue as _queue
+
+    q = _queue.Queue(maxsize=512)
+    _SSE_SUBSCRIBERS.add(q)
+
+    def gen():
+        try:
+            # 首帧立即推送当前状态
+            yield "data: " + json.dumps(
+                sorted(TASKS.values(), key=lambda t: t.get("created_at", 0), reverse=True),
+                ensure_ascii=False,
+            ) + "\n\n"
+            last = None
+            while True:
+                try:
+                    payload = q.get(timeout=15)
+                except _queue.Empty:
+                    # 心跳保活
+                    yield ": ping\n\n"
+                    continue
+                if payload == last:
+                    continue
+                last = payload
+                yield "data: " + payload + "\n\n"
+        finally:
+            _SSE_SUBSCRIBERS.discard(q)
+
+    return Response(
+        gen(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.route("/api/task/<task_id>")
 def api_task(task_id):
     task = TASKS.get(task_id)
@@ -1412,6 +1495,24 @@ def api_tasks_delete():
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_static(path):
+    # 优先服务 Vite 构建产物（dist/，文件名带内容哈希，天然无缓存问题）
+    if DIST_DIR.exists():
+        dist_file = DIST_DIR / path
+        if path and dist_file.exists() and dist_file.is_file():
+            return send_from_directory(str(DIST_DIR), path)
+        # SPA fallback：仅对「无扩展名」的路径（真正的应用路由）返回
+        # index.html。带扩展名但缺失的资源（如旧哈希 JS）必须返回 404，
+        # 否则会错误地返回 HTML，导致浏览器报
+        # "Expected a JavaScript module ... but got text/html" 的 MIME 错误。
+        index = DIST_DIR / "index.html"
+        if index.exists() and not Path(path).suffix:
+            resp = send_from_directory(str(DIST_DIR), "index.html")
+            resp.headers["Cache-Control"] = "no-cache"
+            return resp
+        # 新前端模式下：缺失资源直接 404，绝不回退到旧 static/ 的 HTML
+        abort(404)
+
+    # 回退：旧的原生 JS 前端（static/），开发期未构建 dist 时使用
     full = STATIC_DIR / path
     if path and full.exists() and full.is_file():
         return send_from_directory(str(STATIC_DIR), path)
@@ -1429,12 +1530,29 @@ def serve_static(path):
     return Response(html, mimetype="text/html")
 
 
+# 直接以文件路径形式提供上传/输出文件，供 <video src>、直接下载等场景使用。
+# 仅允许访问对应目录下的真实文件（防目录穿越）。
+@app.route("/uploads/<path:filename>")
+def serve_upload(filename: str):
+    safe = os.path.basename(filename)
+    return send_from_directory(str(UPLOAD_DIR), safe, as_attachment=False)
+
+
+@app.route("/outputs/<path:filename>")
+def serve_output(filename: str):
+    safe = os.path.basename(filename)
+    return send_from_directory(str(OUTPUT_DIR), safe, as_attachment=False)
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 8080))
     if not ensure_ffmpeg():
         # 启动自检失败：给出安装指引后退出（非 0 退出码便于 start.sh 感知）
         raise SystemExit(1)
     print(f"ClipBench 已启动: http://127.0.0.1:{port}")
+    # 注意：macOS 的「隔空播放接收器」默认占用 5000 端口，会与本服务冲突，
+    # 导致浏览器访问根路径收到 403（AirPlay 拦截）。如遇 403，请到
+    # 系统设置 → 通用 → 隔空播放接收器 中关闭，或改用其他端口（PORT 环境变量）。
     if _HAS_IMAGEIO_FFMPEG and _FFMPEG_BIN and "imageio" in _FFMPEG_BIN:
         print("ffmpeg: 使用 imageio-ffmpeg 提供的静态二进制（无需本地安装）")
     else:

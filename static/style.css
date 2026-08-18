@@ -1024,6 +1024,7 @@ input[type="radio"] {
   border-radius: 0;
   font-size: 12px;
   color: var(--muted);
+  padding: 10px;
 }
 .bulkbar.show {
   display: flex;
@@ -1049,6 +1050,9 @@ input[type="radio"] {
     border-color 0.15s ease;
 }
 .bulkbar .row-select-all {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   color: var(--muted);
 }

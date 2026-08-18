@@ -23,3 +23,8 @@ tasks.json
 # 系统文件
 .DS_Store
 *.swp
+
+# 前端构建（pnpm / vite）
+node_modules/
+dist/
+.pnpm-store/

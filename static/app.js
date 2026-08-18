@@ -606,7 +606,7 @@ async function runAction(action, payload, opts = {}) {
     });
     toast("任务已提交", "ok");
     loadTasks();
-    startPolling();
+    startSSE();
   } catch (e) {
     toast(e.message, "err");
   }
@@ -898,47 +898,63 @@ function updateTaskRow(el, t) {
   }
 }
 
+// 增量渲染任务列表：复用已存在节点，仅补齐/更新/移除，避免进度动画被打断。
+// loadTasks（轮询拉取）与 applyTasks（SSE 推送）共用此函数。
+function renderTasks(tasks) {
+  const box = $("#task-list");
+  if (!box) return;
+  if (!tasks || !tasks.length) {
+    box.innerHTML = '<p class="empty">暂无任务。</p>';
+    return;
+  }
+  // 清掉可能存在的空列表占位，避免残留
+  const placeholder = box.querySelector(".empty");
+  if (placeholder) placeholder.remove();
+  // 增量更新：复用已存在的节点，仅补齐/更新/移除，避免进度动画被打断
+  const existing = new Map();
+  box.querySelectorAll(".task-item").forEach((el) => existing.set(el.dataset.id, el));
+  const seen = new Set();
+  for (const t of tasks) {
+    seen.add(t.task_id);
+    let el = existing.get(t.task_id);
+    if (el) {
+      updateTaskRow(el, t);
+      existing.delete(t.task_id);
+    } else {
+      el = renderTaskRow(t);
+      box.appendChild(el);
+      // 新任务若正在运行，立即启动进度外推动画
+      if (TASK_RUNNING(t.status)) {
+        _onServerProgress(t.task_id, t.progress == null ? 8 : t.progress);
+      }
+    }
+  }
+  // 移除已不存在的任务
+  existing.forEach((el) => {
+    _stopProgressAnim(el.dataset.id);
+    el.remove();
+  });
+  // 按后端顺序（最新在前）重排，保持 DOM 顺序与数据一致
+  for (const t of tasks) {
+    const el = box.querySelector(`.task-item[data-id="${t.task_id}"]`);
+    if (el) box.appendChild(el);
+  }
+  updateTaskBulkbar();
+}
+
 async function loadTasks() {
   try {
     const { tasks } = await api("/api/tasks");
-    const box = $("#task-list");
-    if (!tasks.length) {
-      box.innerHTML = '<p class="empty">暂无任务。</p>';
-      return;
-    }
-    // 清掉可能存在的空列表占位，避免残留
-    const placeholder = box.querySelector(".empty");
-    if (placeholder) placeholder.remove();
-    // 增量更新：复用已存在的节点，仅补齐/更新/移除，避免进度动画被打断
-    const existing = new Map();
-    box.querySelectorAll(".task-item").forEach((el) => existing.set(el.dataset.id, el));
-    const seen = new Set();
-    for (const t of tasks) {
-      seen.add(t.task_id);
-      let el = existing.get(t.task_id);
-      if (el) {
-        updateTaskRow(el, t);
-        existing.delete(t.task_id);
-      } else {
-        el = renderTaskRow(t);
-        box.appendChild(el);
-        // 新任务若正在运行，立即启动进度外推动画
-        if (TASK_RUNNING(t.status)) {
-          _onServerProgress(t.task_id, t.progress == null ? 8 : t.progress);
-        }
-      }
-    }
-    // 移除已不存在的任务
-    existing.forEach((el) => {
-      _stopProgressAnim(el.dataset.id);
-      el.remove();
-    });
-    // 按后端顺序（最新在前）重排，保持 DOM 顺序与数据一致
-    for (const t of tasks) {
-      const el = box.querySelector(`.task-item[data-id="${t.task_id}"]`);
-      if (el) box.appendChild(el);
-    }
-    updateTaskBulkbar();
+    renderTasks(tasks);
+  } catch (e) {
+    // ignore
+  }
+}
+
+// SSE 推送的任务列表数据（已是数组），直接增量渲染
+function applyTasks(tasks) {
+  try {
+    renderTasks(tasks);
   } catch (e) {
     // ignore
   }
@@ -1007,26 +1023,24 @@ $("#task-bulk-del").addEventListener("click", async () => {
   }
 });
 
-let polling = false;
-function startPolling() {
-  if (polling) {
-    // 已在轮询中，立即刷新一次即可
-    loadTasks();
-    return;
-  }
-  polling = true;
-  const tick = async () => {
-    await loadTasks();
-    const { tasks } = await api("/api/tasks").catch(() => ({ tasks: [] }));
-    const anyRunning = tasks.some((t) => t.status === "running" || t.status === "queued");
-    if (anyRunning) {
-      // 较频繁地轮询，使进度条平滑过渡而非大步跳变
-      setTimeout(tick, 600);
-    } else {
-      polling = false;
-    }
+let _sse = null;
+function startSSE() {
+  if (_sse) return;  // 已连接，幂等
+  const es = new EventSource("/api/tasks/stream");
+  _sse = es;
+  es.onmessage = (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      // 服务端实时推送任务列表变更，直接增量渲染（含进度动画）
+      applyTasks(data);
+    } catch (e) { /* 忽略心跳/坏帧 */ }
   };
-  tick();
+  es.onerror = () => {
+    // 连接断开时降级为一次性拉取，并延迟重连
+    _sse = null;
+    loadTasks();
+    setTimeout(startSSE, 2000);
+  };
 }
 
 // ---------- 工具 ----------
@@ -1069,6 +1083,7 @@ $("#refresh-tasks").addEventListener("click", loadTasks);
 loadVersion();
 loadFiles();
 loadTasks();
+startSSE();
 
 // 任务删除按钮（事件委托，避免重复渲染丢失绑定）
 const taskListEl = $("#task-list");
