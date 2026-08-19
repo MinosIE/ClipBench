@@ -1,5 +1,5 @@
-import { createSignal, Show } from "solid-js";
-import { selectedId, pushToast, upsertTask } from "../../store";
+import { createSignal, Show, For } from "solid-js";
+import { selectedId, pushToast, upsertTask, faststartEnabled } from "../../store";
 import { compressVideo } from "../../api";
 
 const PRESETS = [
@@ -37,6 +37,7 @@ export default function CompressPanel() {
         preset: preset(),
         crf: crf(),
         scale: scale(),
+        faststart: faststartEnabled(),
       });
       upsertTask({
         task_id,
@@ -58,8 +59,9 @@ export default function CompressPanel() {
       <h2>压缩</h2>
       <p class="muted">降低码率/分辨率以减小文件体积，保持画质可控。</p>
 
-      <div class="field">
-        <label>压缩预设</label>
+      <div class="form-card">
+        <div class="field">
+          <label>压缩预设</label>
         <div class="seg">
           <For each={PRESETS}>
             {(p) => (
@@ -76,14 +78,16 @@ export default function CompressPanel() {
 
       <div class="field">
         <label>质量 (CRF，越大文件越小)</label>
-        <input
-          type="range"
-          min="18"
-          max="34"
-          value={crf()}
-          onInput={(e) => setCrf(+e.currentTarget.value)}
-        />
-        <span class="hint">当前 CRF：{crf()}</span>
+        <div class="range-row">
+          <input
+            type="range"
+            min="18"
+            max="34"
+            value={crf()}
+            onInput={(e) => setCrf(+e.currentTarget.value)}
+          />
+          <span class="range-val">{crf()}</span>
+        </div>
       </div>
 
       <div class="field">
@@ -102,9 +106,13 @@ export default function CompressPanel() {
         </div>
       </div>
 
-      <button class="btn" onClick={submit} disabled={busy()}>
-        {busy() ? "提交中…" : "开始压缩"}
-      </button>
+      </div>
+
+      <div class="actions">
+        <button class="btn" onClick={submit} disabled={busy()}>
+          {busy() ? "提交中…" : "开始压缩"}
+        </button>
+      </div>
     </div>
   );
 }

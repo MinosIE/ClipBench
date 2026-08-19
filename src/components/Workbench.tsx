@@ -344,14 +344,16 @@ export default function Workbench() {
 
             <div class="field">
               <label>修复强度（强度越大字幕越干净，但边缘可能略糊）</label>
-              <input
-                type="range"
-                min="1"
-                max="40"
-                value={strength()}
-                onInput={(e) => setStrength(+e.currentTarget.value)}
-              />
-              <span class="hint">当前强度：{strength()}</span>
+              <div class="range-row">
+                <input
+                  type="range"
+                  min="1"
+                  max="40"
+                  value={strength()}
+                  onInput={(e) => setStrength(+e.currentTarget.value)}
+                />
+                <span class="range-val">{strength()}</span>
+              </div>
             </div>
 
             <div class="field">
@@ -378,13 +380,15 @@ export default function Workbench() {
               </div>
             </div>
 
-            <button
-              class="btn"
-              onClick={start}
-              disabled={busy() || regions.length === 0}
-            >
-              {busy() ? "提交中…" : "开始去字幕"}
-            </button>
+            <div class="actions">
+              <button
+                class="btn"
+                onClick={start}
+                disabled={busy() || regions.length === 0}
+              >
+                {busy() ? "提交中…" : "开始去字幕"}
+              </button>
+            </div>
             <p class="hint">
               在视频画面上按住拖拽框选字幕区域（仅一个）；在已有区域上按住可直接拖动调整位置。
             </p>

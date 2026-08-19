@@ -12,6 +12,7 @@ import {
   setBusy,
   confirmModal,
   pushToast,
+  setActiveTab,
 } from "../store";
 import {
   uploadFile,
@@ -56,6 +57,7 @@ export default function Sidebar() {
 
   const onSelect = (name: string) => {
     setSelectedId(name);
+    setActiveTab("split");
   };
 
   const removeOne = async (name: string) => {

@@ -43,8 +43,9 @@ export default function ScreenshotPanel() {
       <h2>截图</h2>
       <p class="muted">截取单张画面，或按固定间隔批量截取。</p>
 
-      <div class="field">
-        <label>模式</label>
+      <div class="form-card">
+        <div class="field">
+          <label>模式</label>
         <div class="seg">
           <button
             class={mode() === "single" ? "active" : ""}
@@ -104,9 +105,13 @@ export default function ScreenshotPanel() {
         </div>
       </div>
 
-      <button class="btn" onClick={submit} disabled={busy()}>
-        {busy() ? "提交中…" : "开始截图"}
-      </button>
+      </div>
+
+      <div class="actions">
+        <button class="btn" onClick={submit} disabled={busy()}>
+          {busy() ? "提交中…" : "开始截图"}
+        </button>
+      </div>
     </div>
   );
 }

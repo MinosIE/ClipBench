@@ -17,6 +17,8 @@ import {
   modal,
   setModal,
   toasts,
+  faststartEnabled,
+  toggleFaststart,
 } from "./store";
 import { uploadFile, thumbUrl } from "./api";
 import Sidebar, { refreshFiles } from "./components/Sidebar";
@@ -41,6 +43,14 @@ function getSelectedFile() {
   return files.find((f) => f.name === id) ?? null;
 }
 
+// 后端 format_name 形如 "mov,mp4,m4a,3gp,3g2,mj2" / "mp4"，取第一个容器名大写显示
+function formatName(f: StoredFile): string {
+  const raw = f.format_name;
+  if (!raw) return "";
+  const first = String(raw).split(",")[0].trim().toUpperCase();
+  return first ? `${first} 格式` : "";
+}
+
 export default function App() {
   let fileInput!: HTMLInputElement;
 
@@ -63,7 +73,10 @@ export default function App() {
       pushToast(`已上传 ${list.length} 个文件`, "success");
       await refreshFiles();
       // 上传后自动选中最后一个（用后端返回的 filename，避免原始名被清洗导致不匹配）
-      if (uploaded.length > 0) setSelectedId(uploaded[uploaded.length - 1]);
+      if (uploaded.length > 0) {
+        setSelectedId(uploaded[uploaded.length - 1]);
+        setActiveTab("split");
+      }
     } catch (err: any) {
       pushToast(err?.message || "上传失败", "error");
     } finally {
@@ -93,6 +106,20 @@ export default function App() {
           </div>
         </div>
         <div class="topbar-actions">
+          <label class="fs-switch">
+            <input
+              type="checkbox"
+              checked={faststartEnabled()}
+              onChange={() => toggleFaststart()}
+            />
+            <span class="fs-text">快速启动</span>
+            <span
+              class="fs-help"
+              tabindex="0"
+              role="tooltip"
+              data-tip="开启后，输出的 MP4/MOV 视频会把索引信息移到文件开头，让网页和手机能一边下载一边播放，不用等整段下完。小白一般保持开启即可。"
+            >?</span>
+          </label>
           <button
             class="task-toggle"
             onClick={() => fileInput.click()}
@@ -136,7 +163,34 @@ export default function App() {
                         {file().is_video ? "视频" : "图片"}
                         {file().fps ? ` · ${file().fps}fps` : ""}
                       </span>
+                      <span>{formatName(file())}</span>
                     </div>
+                    <Show when={file().is_video}>
+                      <div class="mi-codec">
+                        <span class="codec-tag">
+                          {file().video_codec ?? "—"}
+                        </span>
+                        {file().duration != null ? (
+                          <span>
+                            时长 {Math.floor(file().duration / 60)}:
+                            {String(Math.floor(file().duration % 60)).padStart(2, "0")}
+                          </span>
+                        ) : null}
+                        {file().video_bitrate ? (
+                          <span>视频 {Math.round(file().video_bitrate / 1000)} kbps</span>
+                        ) : null}
+                        {file().audio_codec ? (
+                          <span class="codec-tag audio">
+                            {file().audio_codec}
+                            {file().audio_bitrate
+                              ? ` ${Math.round(file().audio_bitrate / 1000)}k`
+                              : ""}
+                          </span>
+                        ) : (
+                          <span>无音轨</span>
+                        )}
+                      </div>
+                    </Show>
                   </div>
                 </div>
 
@@ -149,6 +203,18 @@ export default function App() {
                         classList={{ active: activeTab() === t.key }}
                         onClick={() => setActiveTab(t.key)}
                       >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <For each={t.icon}>
+                            {(d) => <path d={d} />}
+                          </For>
+                        </svg>
                         {t.label}
                       </button>
                     )}

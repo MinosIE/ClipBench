@@ -2,7 +2,15 @@
 // 开发期由 vite proxy 转发 /api）。
 
 async function jsonFetch(url: string, init?: RequestInit) {
-  const res = await fetch(url, init);
+  const method = (init?.method ?? "GET").toUpperCase();
+  const needsBody = method === "POST" || method === "PUT" || method === "PATCH";
+  // 写操作无 body 时，补上空 JSON 与 Content-Type，避免后端 415
+  const headers = {
+    "Content-Type": "application/json",
+    ...(init?.headers ?? {}),
+  };
+  const body = needsBody && init?.body == null ? "{}" : init?.body;
+  const res = await fetch(url, { ...init, headers, body });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`请求失败 ${res.status}: ${text.slice(0, 200)}`);
@@ -20,6 +28,13 @@ export interface StoredFile {
   height?: number;
   fps?: number;
   fourcc?: string;
+  // 编码详情（来自后端 meta，用于选中文件时展示）
+  video_codec?: string;
+  audio_codec?: string;
+  duration?: number;
+  video_bitrate?: number;
+  audio_bitrate?: number;
+  format_name?: string;
 }
 
 export interface Region {
@@ -59,6 +74,12 @@ function mapFile(raw: any): StoredFile {
     height: meta.height,
     fps: meta.fps,
     fourcc: meta.video_codec,
+    video_codec: meta.video_codec,
+    audio_codec: meta.audio_codec,
+    duration: meta.duration,
+    video_bitrate: meta.video_bitrate,
+    audio_bitrate: meta.audio_bitrate,
+    format_name: meta.format_name,
   };
 }
 
@@ -107,6 +128,10 @@ export function uploadUrl(name: string) {
 export function outputUrl(name: string) {
   return `/outputs/${encodeURIComponent(name)}`;
 }
+export function downloadFileUrl(name: string) {
+  // 单文件结果走 /api/download 才会带 Content-Disposition: attachment 触发下载
+  return `/api/download/${encodeURIComponent(name)}`;
+}
 export function downloadDirUrl(taskId: string) {
   return `/api/download_dir/${encodeURIComponent(taskId)}`;
 }
@@ -129,8 +154,11 @@ export async function deleteTask(taskId: string): Promise<void> {
   });
 }
 
-export async function deleteAllTasks(): Promise<void> {
-  await jsonFetch(`/api/tasks/delete`, { method: "POST" });
+export async function deleteAllTasks(ids: string[]): Promise<void> {
+  await jsonFetch(`/api/tasks/delete`, {
+    method: "POST",
+    body: JSON.stringify({ task_ids: ids }),
+  });
 }
 
 // ---------- 去字幕 ----------
@@ -204,6 +232,7 @@ export async function convertVideo(params: {
   target: string;
   crf?: number;
   vcodec?: string;
+  faststart?: boolean;
 }): Promise<{ task_id: string }> {
   return jsonFetch("/api/convert", {
     method: "POST",
@@ -218,6 +247,7 @@ export async function compressVideo(params: {
   preset: string;
   crf: number;
   scale: "original" | "1080" | "720" | "480";
+  faststart?: boolean;
 }): Promise<{ task_id: string }> {
   return jsonFetch("/api/compress", {
     method: "POST",
@@ -233,6 +263,7 @@ export async function cropVideo(params: {
   y: number;
   w: number;
   h: number;
+  faststart?: boolean;
 }): Promise<{ task_id: string }> {
   return jsonFetch("/api/crop", {
     method: "POST",
@@ -242,13 +273,13 @@ export async function cropVideo(params: {
 }
 
 // ---------- 合并 ----------
-export async function mergeVideos(file_ids: string[]): Promise<{
+export async function mergeVideos(file_ids: string[], faststart?: boolean): Promise<{
   task_id: string;
 }> {
   return jsonFetch("/api/merge", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file_ids }),
+    body: JSON.stringify({ file_ids, faststart: !!faststart }),
   });
 }
 
@@ -258,6 +289,7 @@ export async function rotateVideo(params: {
   rotation: number;
   flip_h?: boolean;
   flip_v?: boolean;
+  faststart?: boolean;
 }): Promise<{ task_id: string }> {
   return jsonFetch("/api/rotate", {
     method: "POST",
@@ -287,6 +319,7 @@ export async function watermarkVideo(params: {
   alpha?: number;
   watermark_id?: string;
   scale_w?: number;
+  faststart?: boolean;
 }): Promise<{ task_id: string }> {
   return jsonFetch("/api/watermark", {
     method: "POST",
@@ -300,6 +333,7 @@ export async function speedVideo(params: {
   file_id: string;
   speed: number;
   reverse?: boolean;
+  faststart?: boolean;
 }): Promise<{ task_id: string }> {
   return jsonFetch("/api/speed", {
     method: "POST",

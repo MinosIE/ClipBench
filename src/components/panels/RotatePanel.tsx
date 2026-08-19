@@ -1,5 +1,5 @@
-import { createSignal, Show } from "solid-js";
-import { selectedId, pushToast, upsertTask } from "../../store";
+import { createSignal, Show, For } from "solid-js";
+import { selectedId, pushToast, upsertTask, faststartEnabled } from "../../store";
 import { rotateVideo } from "../../api";
 
 const ROTS = [
@@ -31,6 +31,7 @@ export default function RotatePanel() {
         rotation: rotation(),
         flip_h: flipH(),
         flip_v: flipV(),
+        faststart: faststartEnabled(),
       });
       upsertTask({
         task_id,
@@ -54,8 +55,9 @@ export default function RotatePanel() {
       <h2>旋转</h2>
       <p class="muted">旋转视频角度，或水平/垂直翻转画面。</p>
 
-      <div class="field">
-        <label>旋转角度</label>
+      <div class="form-card">
+        <div class="field">
+          <label>旋转角度</label>
         <div class="seg">
           <For each={ROTS}>
             {(r) => (
@@ -71,7 +73,7 @@ export default function RotatePanel() {
       </div>
 
       <div class="row">
-        <label style={{ "font-size": "13px" }}>
+        <label class="check-row">
           <input
             type="checkbox"
             checked={flipH()}
@@ -79,7 +81,7 @@ export default function RotatePanel() {
           />
           水平翻转
         </label>
-        <label style={{ "font-size": "13px" }}>
+        <label class="check-row">
           <input
             type="checkbox"
             checked={flipV()}
@@ -89,9 +91,13 @@ export default function RotatePanel() {
         </label>
       </div>
 
-      <button class="btn" onClick={submit} disabled={busy()}>
-        {busy() ? "提交中…" : "开始旋转"}
-      </button>
+      </div>
+
+      <div class="actions">
+        <button class="btn" onClick={submit} disabled={busy()}>
+          {busy() ? "提交中…" : "开始旋转"}
+        </button>
+      </div>
     </div>
   );
 }

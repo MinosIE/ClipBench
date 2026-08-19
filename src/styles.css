@@ -15,8 +15,9 @@
   --warn: #ffb020;
   --radius: 14px;
   --shadow: 0 1px 3px rgba(20, 30, 60, 0.06), 0 6px 20px rgba(20, 30, 60, 0.05);
-  --font: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+  --font:
+    "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
 }
 
 * {
@@ -85,6 +86,97 @@ button {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.fs-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 10px 5px 11px;
+}
+.fs-switch input {
+  width: 15px;
+  height: 15px;
+  accent-color: #36c5f0;
+  cursor: pointer;
+}
+.fs-text {
+  white-space: nowrap;
+}
+.fs-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #36c5f0;
+  color: #06222e;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+.fs-help:hover,
+.fs-help:focus {
+  background: #5bd3f3;
+  outline: none;
+}
+/* 鼠标悬停/聚焦立即显示说明气泡 */
+.fs-help::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 10px);
+  right: -6px;
+  width: 260px;
+  padding: 10px 12px;
+  background: #0f2733;
+  color: #e9f6fb;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+  pointer-events: none;
+  z-index: 50;
+}
+.fs-help::before {
+  content: "";
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 4px;
+  border: 6px solid transparent;
+  border-bottom-color: #0f2733;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+  z-index: 50;
+}
+.fs-help:hover::after,
+.fs-help:focus::after,
+.fs-help:hover::before,
+.fs-help:focus::before {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }
 .task-toggle {
   background: var(--accent-grad);
@@ -192,7 +284,9 @@ button {
   border-radius: 10px;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 .file-card:hover {
   background: var(--panel-2);
@@ -223,6 +317,26 @@ button {
 .file-meta {
   color: var(--muted);
   font-size: 11px;
+}
+.mi-codec {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  align-items: center;
+}
+.mi-codec .codec-tag {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-weight: 600;
+}
+.mi-codec .codec-tag.audio {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
 }
 .file-del {
   background: transparent;
@@ -315,13 +429,21 @@ button {
   border-radius: 9px;
   font-size: 13px;
   transition: all 0.12s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tab svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
 }
 .tab:hover {
   background: var(--panel-2);
   color: var(--text);
 }
 .tab.active {
-  background: var(--accent);
+  background: var(--accent-grad);
   color: #fff;
   box-shadow: 0 2px 8px rgba(79, 140, 255, 0.4);
 }
@@ -331,13 +453,34 @@ button {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px;
+  padding: 22px 24px;
   box-shadow: var(--shadow);
+  max-width: 800px;
+  margin: 0 auto;
 }
 .tab-panel h2 {
-  margin: 0 0 14px;
-  font-size: 17px;
-  font-weight: 700;
+  position: relative;
+  margin: 0 0 6px;
+  padding-left: 12px;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+.tab-panel h2::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--accent-grad);
+}
+.tab-panel > p.muted {
+  margin: 0 0 16px;
+  padding-left: 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 .tab-panel h3 {
   margin: 18px 0 10px;
@@ -362,16 +505,16 @@ button {
 /* ---------- 表单 ---------- */
 .row {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  align-items: flex-end;
+  gap: 14px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 .field {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
   min-width: 160px;
 }
 .field > label {
@@ -392,7 +535,9 @@ textarea {
   background: #fff;
   color: var(--text);
   outline: none;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
 }
 input:focus,
 select:focus,
@@ -401,26 +546,214 @@ textarea:focus {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 input[type="range"] {
-  width: 220px;
-  accent-color: var(--accent);
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  max-width: 320px;
+  height: 6px;
+  border-radius: 999px;
+  background: #e3e8f1;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent-grad);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(20, 30, 60, 0.3);
+  transition: transform 0.1s ease;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: #e3e8f1;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent-grad);
+  border: 2px solid #fff;
+  cursor: pointer;
+}
+/* 滑块 + 数值徽标 */
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.range-val {
+  flex: none;
+  min-width: 38px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  background: var(--accent-soft);
+  color: var(--accent-2);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .seg {
   display: inline-flex;
+  flex-wrap: wrap;
   border: 1px solid var(--border);
   border-radius: 9px;
   overflow: hidden;
+  align-self: flex-start;
 }
 .seg button {
   border: none;
+  border-right: 1px solid var(--border);
   background: #fff;
   color: var(--muted);
   padding: 8px 14px;
   font-weight: 600;
   font-size: 13px;
+  white-space: nowrap;
+}
+.seg button:last-child {
+  border-right: none;
 }
 .seg button.active {
-  background: var(--accent);
+  background: var(--accent-grad);
   color: #fff;
+}
+.seg button:hover:not(.active) {
+  background: #f0f4fb;
+  color: var(--text);
+}
+/* 复选框行：iOS 风格开关，与 .field>label 风格一致 */
+.check-row {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-left: 30px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.check-row input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.check-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 15px;
+  border-radius: 999px;
+  background: #d6dce6;
+  transition: background 0.15s ease;
+}
+.check-row::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 30, 60, 0.3);
+  transition: transform 0.15s ease;
+}
+.check-row:hover::before {
+  background: #c8d0dd;
+}
+.check-row:has(input:checked)::before {
+  background: var(--accent);
+}
+.check-row:has(input:checked)::after {
+  transform: translateY(-50%) translateX(11px);
+}
+.check-row:has(input:checked):hover::before {
+  background: var(--accent-2);
+}
+.row .check-row {
+  margin-bottom: 0;
+}
+/* 裁剪选区上的删除按钮 */
+.crop-del {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #ff5b5b;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.crop-del:hover {
+  background: #ff7a7a;
+}
+/* 提交按钮容器：统一上间距，主按钮右对齐、占满可用宽度 */
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.actions .btn {
+  min-width: 160px;
+  justify-content: center;
+  background: var(--accent-grad);
+  box-shadow: 0 4px 14px rgba(79, 108, 255, 0.28);
+}
+.actions .btn:hover {
+  background: var(--accent-grad);
+  filter: brightness(1.06);
+}
+.actions .btn:disabled {
+  box-shadow: none;
+}
+.actions .btn.secondary {
+  background: var(--panel-2);
+  box-shadow: none;
+}
+.actions .btn.secondary:hover {
+  background: #eef1f7;
+  filter: none;
+}
+/* 参数卡片分组：把字段区收进浅色圆角卡片，与标题/按钮分层 */
+.form-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+}
+.form-card .field:last-child,
+.form-card .row:last-child {
+  margin-bottom: 0;
 }
 .muted {
   color: var(--muted);
@@ -440,7 +773,9 @@ input[type="range"] {
   padding: 9px 16px;
   font-weight: 700;
   font-size: 13px;
-  transition: background 0.15s ease, transform 0.05s ease;
+  transition:
+    background 0.15s ease,
+    transform 0.05s ease;
 }
 .btn:hover {
   background: var(--accent-2);
@@ -480,7 +815,9 @@ input[type="range"] {
   padding: 22px;
   text-align: center;
   color: var(--muted);
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
   cursor: pointer;
   margin-bottom: 14px;
 }
@@ -517,7 +854,10 @@ input[type="range"] {
 .region-tools {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
+}
+.region-tools .field {
+  margin-bottom: 0;
 }
 .region-list {
   display: flex;
@@ -740,7 +1080,9 @@ input[type="range"] {
   flex-direction: column;
   gap: 6px;
   background: #fff;
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
 }
 .pick-item.selected {
   border-color: var(--accent);

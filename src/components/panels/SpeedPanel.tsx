@@ -1,5 +1,5 @@
-import { createSignal, Show } from "solid-js";
-import { selectedId, pushToast, upsertTask } from "../../store";
+import { createSignal, Show, For } from "solid-js";
+import { selectedId, pushToast, upsertTask, faststartEnabled } from "../../store";
 import { speedVideo } from "../../api";
 
 export default function SpeedPanel() {
@@ -24,6 +24,7 @@ export default function SpeedPanel() {
         file_id: selectedId()!,
         speed: speed(),
         reverse: reverse(),
+        faststart: faststartEnabled(),
       });
       upsertTask({
         task_id,
@@ -45,8 +46,9 @@ export default function SpeedPanel() {
       <h2>调速 / 倒放</h2>
       <p class="muted">调整播放速度（0.5x ~ 4x），或生成倒放视频。</p>
 
-      <div class="field">
-        <label>速度倍率</label>
+      <div class="form-card">
+        <div class="field">
+          <label>速度倍率</label>
         <div class="seg">
           <For each={presets}>
             {(p) => (
@@ -59,18 +61,20 @@ export default function SpeedPanel() {
             )}
           </For>
         </div>
-        <input
-          type="range"
-          min="0.25"
-          max="4"
-          step="0.25"
-          value={speed()}
-          onInput={(e) => setSpeed(+e.currentTarget.value)}
-        />
-        <span class="hint">当前：{speed()}x</span>
+        <div class="range-row">
+          <input
+            type="range"
+            min="0.25"
+            max="4"
+            step="0.25"
+            value={speed()}
+            onInput={(e) => setSpeed(+e.currentTarget.value)}
+          />
+          <span class="range-val">{speed()}x</span>
+        </div>
       </div>
 
-      <label style={{ "font-size": "13px" }}>
+      <label class="check-row">
         <input
           type="checkbox"
           checked={reverse()}
@@ -79,7 +83,9 @@ export default function SpeedPanel() {
         倒放
       </label>
 
-      <div style={{ "margin-top": "14px" }}>
+      </div>
+
+      <div class="actions">
         <button class="btn" onClick={submit} disabled={busy()}>
           {busy() ? "提交中…" : "开始处理"}
         </button>

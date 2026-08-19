@@ -234,7 +234,10 @@ _SSE_SUBSCRIBERS = set()
 _thr.Thread(target=_sse_pump, daemon=True).start()
 
 
-load_tasks()
+# 测试模式（CLIPBENCH_TEST=1，由 tests/conftest.py 设置）下跳过加载真实任务状态，
+# 避免 pytest 进程写入/污染线上 tasks.json；测试内部会使用隔离的临时目录。
+if not os.environ.get("CLIPBENCH_TEST"):
+    load_tasks()
 
 
 # ---------------- ffmpeg 二进制解析 ----------------
@@ -393,6 +396,10 @@ def get_media_meta(path: str) -> dict:
         meta["width"] = video_stream.get("width")
         meta["height"] = video_stream.get("height")
         meta["video_codec"] = video_stream.get("codec_name")
+        try:
+            meta["video_bitrate"] = int(video_stream.get("bit_rate") or 0)
+        except Exception:
+            meta["video_bitrate"] = 0
         fr = video_stream.get("avg_frame_rate", "0/1")
         try:
             a, b = fr.split("/")
@@ -401,6 +408,10 @@ def get_media_meta(path: str) -> dict:
             meta["fps"] = 0
     if audio_stream:
         meta["audio_codec"] = audio_stream.get("codec_name")
+        try:
+            meta["audio_bitrate"] = int(audio_stream.get("bit_rate") or 0)
+        except Exception:
+            meta["audio_bitrate"] = 0
     return meta
 
 
@@ -411,6 +422,14 @@ def get_ffmpeg_version() -> str:
         return first.strip()
     except Exception:
         return "未检测到 ffmpeg"
+
+
+def _finalize(args, out, faststart=False):
+    """在输出文件名前按需追加 -movflags +faststart（仅对渐进式容器有效）"""
+    if faststart and out.suffix.lower() in (".mp4", ".mov", ".m4v"):
+        args += ["-movflags", "+faststart"]
+    args += [str(out)]
+    return args
 
 
 def run_ffmpeg(args, task_id, workdir):
@@ -937,6 +956,7 @@ def api_convert():
     target = data.get("target", "mp4")
     meta = get_media_meta(str(src))
     out = OUTPUT_DIR / f"conv_{src.stem}_{int(time.time())}.{target}"
+    faststart = bool(data.get("faststart", False))
     crf = data.get("crf")
     # 需要强制重编码的容器/格式
     force_reencode = target in ("gif", "webm")
@@ -961,7 +981,7 @@ def api_convert():
                     "-b:v", "0", "-c:a", "libopus"]
         else:
             args += ["-c:a", "copy"]
-        args += [str(out)]
+        args = _finalize(args, out, faststart)
         task_id = new_task(f"格式转换 → {target}", duration=meta.get("duration", 0))
         TASKS[task_id]["output_name"] = out.name
         save_tasks()
@@ -979,7 +999,7 @@ def api_convert():
         args += ["-c:a", "aac", "-b:a", "128k"]
     else:
         args += ["-c:a", "copy"]
-    args += [str(out)]
+    args = _finalize(args, out, faststart)
     task_id = new_task(f"格式转换 → {target}", duration=meta.get("duration", 0))
     TASKS[task_id]["output_name"] = out.name
     save_tasks()
@@ -996,15 +1016,37 @@ def api_compress():
         return jsonify({"error": "源文件不存在"}), 404
     meta = get_media_meta(str(src))
     preset = data.get("preset", "medium")
-    crf = data.get("crf", 23)
+    crf = int(data.get("crf", 23))
     scale = data.get("scale", "original")  # original | 1080 | 720 | 480
+    faststart = bool(data.get("faststart", False))
+    vcodec = (meta.get("video_codec") or "").lower()
+    # 源已是 HEVC(H.265) 时，强制转成 H.264 反而会让文件变大（H.264 压缩率更低、
+    # 且有损转码画质下降）。因此 HEVC 源继续用 libx265 重编码才能真正压缩。
+    # x265 同 CRF 比 x264 更保真，基础偏移 +6 才接近同视觉质量；若源视频码率本身已
+    # 很低（< 2Mbps，说明源已很省），再额外加大偏移，避免重新编码后文件反增。
+    if vcodec in ("hevc", "h265", "h.265"):
+        enc = "libx265"
+        offset = 6 + (10 if int(meta.get("video_bitrate") or 0) < 2000000 else 0)
+        use_crf = crf + offset
+        codec_label = "HEVC"
+    else:
+        enc = "libx264"
+        use_crf = crf
+        codec_label = "H.264"
     out = OUTPUT_DIR / f"comp_{src.stem}_{int(time.time())}.mp4"
-    args = ["-i", str(src), "-c:v", "libx264", "-preset", preset,
-            "-crf", str(crf)]
+    args = ["-i", str(src), "-c:v", enc, "-preset", preset,
+            "-crf", str(use_crf)]
     if scale != "original":
         args += ["-vf", f"scale=-2:{scale}"]
-    args += ["-c:a", "aac", "-b:a", "128k", str(out)]
-    task_id = new_task(f"压缩 (CRF {crf})", duration=meta.get("duration", 0))
+    # 音频：源音频码率已低于 128k 时直接 copy，避免强行升码率导致文件反增；
+    # 否则统一重编码为 AAC 128k。
+    src_a_bitrate = int(meta.get("audio_bitrate") or 0)
+    if src_a_bitrate and src_a_bitrate < 128000:
+        args += ["-c:a", "copy"]
+    else:
+        args += ["-c:a", "aac", "-b:a", "128k"]
+    args = _finalize(args, out, faststart)
+    task_id = new_task(f"压缩 {codec_label} (CRF {use_crf})", duration=meta.get("duration", 0))
     TASKS[task_id]["output_name"] = out.name
     save_tasks()
     start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
@@ -1023,9 +1065,11 @@ def api_crop():
     y = data.get("y", 0)
     w = data.get("w") or meta.get("width")
     h = data.get("h") or meta.get("height")
+    faststart = bool(data.get("faststart", False))
     out = OUTPUT_DIR / f"crop_{src.stem}_{int(time.time())}{src.suffix}"
     vf = f"crop={w}:{h}:{x}:{y}"
-    args = ["-i", str(src), "-vf", vf, "-c:a", "copy", str(out)]
+    args = ["-i", str(src), "-vf", vf, "-c:a", "copy"]
+    args = _finalize(args, out, faststart)
     task_id = new_task(f"裁剪 {w}x{h}", duration=meta.get("duration", 0))
     TASKS[task_id]["output_name"] = out.name
     save_tasks()
@@ -1037,6 +1081,7 @@ def api_crop():
 @app.route("/api/merge", methods=["POST"])
 def api_merge():
     data = request.json
+    faststart = bool(data.get("faststart", False))
     file_ids = [secure_filename(f) for f in data.get("file_ids", [])]
     if len(file_ids) < 2:
         return jsonify({"error": "请至少选择 2 个文件进行合并"}), 400
@@ -1053,7 +1098,8 @@ def api_merge():
     out = OUTPUT_DIR / f"merge_{int(time.time())}{suffix}"
     # 统一编码避免拼接黑屏/音画不同步: 重编码为 h264+aac
     args = ["-f", "concat", "-safe", "0", "-i", str(list_file),
-            "-c:v", "libx264", "-c:a", "aac", "-b:a", "128k", str(out)]
+            "-c:v", "libx264", "-c:a", "aac", "-b:a", "128k"]
+    args = _finalize(args, out, faststart)
     duration = sum(get_media_meta(str(p)).get("duration", 0) for p in paths)
     task_id = new_task(f"合并 {len(file_ids)} 个文件", duration=duration)
     TASKS[task_id]["output_name"] = out.name
@@ -1074,6 +1120,7 @@ def api_rotate():
     rot = int(data.get("rotation", 0))  # 0 90 180 270
     flip_h = bool(data.get("flip_h", False))
     flip_v = bool(data.get("flip_v", False))
+    faststart = bool(data.get("faststart", False))
     # 转置矩阵: transpose 需要配rotation
     vf_parts = []
     # ffmpeg transpose: 0=90CW, 1=90CCW, 2=90CW+flipV, 3=90CCW+flipV
@@ -1091,7 +1138,8 @@ def api_rotate():
         return jsonify({"error": "请选择旋转或翻转操作"}), 400
     out = OUTPUT_DIR / f"rot_{src.stem}_{int(time.time())}{src.suffix}"
     vf = ",".join(vf_parts)
-    args = ["-i", str(src), "-vf", vf, "-c:a", "copy", str(out)]
+    args = ["-i", str(src), "-vf", vf, "-c:a", "copy"]
+    args = _finalize(args, out, faststart)
     task_id = new_task(f"旋转 {rot}°" + ("+翻转" if (flip_h or flip_v) else ""),
                        duration=meta.get("duration", 0))
     TASKS[task_id]["output_name"] = out.name
@@ -1112,6 +1160,7 @@ def api_watermark():
     wm_type = data.get("type", "text")  # text | image
     pos = data.get("position", "br")    # tl tr bl br c
     margin = int(data.get("margin", 20))
+    faststart = bool(data.get("faststart", False))
     # 位置映射为 overlay 表达式
     pos_map = {
         "tl": f"{margin}:{margin}",
@@ -1135,7 +1184,8 @@ def api_watermark():
         y_expr = y_expr.replace(":", r"\:")
         draw = (f"drawtext=text='{text}':fontsize={fontsize}"
                 f":fontcolor={color}@{alpha}:x={x_expr}:y={y_expr}")
-        args = ["-i", str(src), "-vf", draw, "-c:a", "copy", str(out)]
+        args = ["-i", str(src), "-vf", draw, "-c:a", "copy"]
+        args = _finalize(args, out, faststart)
         task_id = new_task(f"文字水印: {text[:12]}", duration=meta.get("duration", 0))
     else:
         wm_file = request.files.get("watermark") if False else None
@@ -1163,7 +1213,8 @@ def api_watermark():
         else:
             filt = f"[0:v][1:v]overlay={overlay}"
         args = ["-i", str(src), "-i", str(wmp), "-filter_complex",
-                filt, "-c:a", "copy", str(out)]
+                filt, "-c:a", "copy"]
+        args = _finalize(args, out, faststart)
         task_id = new_task(f"图片水印", duration=meta.get("duration", 0))
     TASKS[task_id]["output_name"] = out.name
     save_tasks()
@@ -1202,6 +1253,7 @@ def api_speed():
     if speed <= 0:
         return jsonify({"error": "速度需大于 0"}), 400
     reverse = bool(data.get("reverse", False))
+    faststart = bool(data.get("faststart", False))
     out = OUTPUT_DIR / f"speed_{src.stem}_{int(time.time())}{src.suffix}"
     # setpts 控制视频速度，atempo 控制音频速度（最大2x，可链式）
     pts = 1.0 / speed
@@ -1220,7 +1272,8 @@ def api_speed():
     if reverse:
         af = "areverse," + af
         vf = "reverse," + vf
-    args = ["-i", str(src), "-vf", vf, "-af", af, str(out)]
+    args = ["-i", str(src), "-vf", vf, "-af", af]
+    args = _finalize(args, out, faststart)
     task_id = new_task(f"调速 {speed}x" + (" · 倒放" if reverse else ""),
                        duration=meta.get("duration", 0) / speed)
     TASKS[task_id]["output_name"] = out.name
@@ -1365,6 +1418,17 @@ def api_task(task_id):
     return jsonify(task)
 
 
+@app.route("/api/task/<task_id>/cancel", methods=["POST"])
+def api_task_cancel(task_id):
+    """取消运行中的任务（前端取消按钮入口）。"""
+    task = TASKS.get(task_id)
+    if not task:
+        return jsonify({"error": "任务不存在"}), 404
+    if task.get("status") in ("running", "queued"):
+        cancel_task(task_id)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/task/<task_id>/delete", methods=["POST"])
 def api_task_delete(task_id):
     """删除任务记录，可选一并删除输出文件。运行中的任务会先被强制取消。"""
@@ -1495,43 +1559,36 @@ def api_tasks_delete():
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_static(path):
-    # 优先服务 Vite 构建产物（dist/，文件名带内容哈希，天然无缓存问题）
-    if DIST_DIR.exists():
-        dist_file = DIST_DIR / path
-        if path and dist_file.exists() and dist_file.is_file():
-            return send_from_directory(str(DIST_DIR), path)
-        # SPA fallback：仅对「无扩展名」的路径（真正的应用路由）返回
-        # index.html。带扩展名但缺失的资源（如旧哈希 JS）必须返回 404，
-        # 否则会错误地返回 HTML，导致浏览器报
-        # "Expected a JavaScript module ... but got text/html" 的 MIME 错误。
-        index = DIST_DIR / "index.html"
-        if index.exists() and not Path(path).suffix:
-            resp = send_from_directory(str(DIST_DIR), "index.html")
-            resp.headers["Cache-Control"] = "no-cache"
-            return resp
-        # 新前端模式下：缺失资源直接 404，绝不回退到旧 static/ 的 HTML
+    # 仅服务 Vite 构建产物（dist/，文件名带内容哈希，天然无缓存问题）。
+    # 旧的原生 JS 前端（static/index.html 等）已废弃移除，不再回退。
+    if not DIST_DIR.exists():
         abort(404)
-
-    # 回退：旧的原生 JS 前端（static/），开发期未构建 dist 时使用
-    full = STATIC_DIR / path
-    if path and full.exists() and full.is_file():
-        return send_from_directory(str(STATIC_DIR), path)
-    # 返回 index.html 时，自动给静态资源引用追加基于文件修改时间的时间戳，
-    # 任何改动 CSS/JS 都会自动 bust 浏览器缓存，无需手动维护版本号。
-    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    def _ver(ref):
-        fp = STATIC_DIR / ref.lstrip("/")
-        ts = int(fp.stat().st_mtime) if fp.exists() else 0
-        return f"{ref}?v={ts}"
-    html = re.sub(r'(href|src)="(/style\.css)(?:\?v=\d+)?"',
-                  lambda m: f'{m.group(1)}="{_ver("/style.css")}"', html)
-    html = re.sub(r'(href|src)="(/app\.js)(?:\?v=\d+)?"',
-                  lambda m: f'{m.group(1)}="{_ver("/app.js")}"', html)
-    return Response(html, mimetype="text/html")
+    dist_file = DIST_DIR / path
+    if path and dist_file.exists() and dist_file.is_file():
+        return send_from_directory(str(DIST_DIR), path)
+    # SPA fallback：仅对「无扩展名」的路径（真正的应用路由）返回
+    # index.html。带扩展名但缺失的资源（如旧哈希 JS）必须返回 404，
+    # 否则会错误地返回 HTML，导致浏览器报
+    # "Expected a JavaScript module ... but got text/html" 的 MIME 错误。
+    index = DIST_DIR / "index.html"
+    if index.exists() and not Path(path).suffix:
+        resp = send_from_directory(str(DIST_DIR), "index.html")
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+    abort(404)
 
 
 # 直接以文件路径形式提供上传/输出文件，供 <video src>、直接下载等场景使用。
 # 仅允许访问对应目录下的真实文件（防目录穿越）。
+@app.route("/favicon.ico")
+@app.route("/favicon.svg")
+def serve_favicon():
+    fav = STATIC_DIR / "favicon.svg"
+    if not fav.exists():
+        abort(404)
+    return send_from_directory(str(STATIC_DIR), "favicon.svg", mimetype="image/svg+xml")
+
+
 @app.route("/uploads/<path:filename>")
 def serve_upload(filename: str):
     safe = os.path.basename(filename)

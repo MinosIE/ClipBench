@@ -1,5 +1,5 @@
-import { createSignal, Show } from "solid-js";
-import { selectedId, pushToast, upsertTask } from "../../store";
+import { createSignal, Show, For } from "solid-js";
+import { selectedId, pushToast, upsertTask, faststartEnabled } from "../../store";
 import { convertVideo } from "../../api";
 
 const TARGETS = [
@@ -32,6 +32,7 @@ export default function ConvertPanel() {
         target: target(),
         crf: crf(),
         vcodec: isAudio() ? undefined : vcodec(),
+        faststart: faststartEnabled(),
       });
       upsertTask({
         task_id,
@@ -53,8 +54,9 @@ export default function ConvertPanel() {
       <h2>格式转换</h2>
       <p class="muted">将视频转换为目标封装/编码格式，或单独抽取音频。</p>
 
-      <div class="field">
-        <label>目标格式</label>
+      <div class="form-card">
+        <div class="field">
+          <label>目标格式</label>
         <select
           value={target()}
           onChange={(e) => setTarget(e.currentTarget.value)}
@@ -81,20 +83,26 @@ export default function ConvertPanel() {
 
         <div class="field">
           <label>质量 (CRF，越小越好，18~28)</label>
-          <input
-            type="range"
-            min="18"
-            max="28"
-            value={crf()}
-            onInput={(e) => setCrf(+e.currentTarget.value)}
-          />
-          <span class="hint">当前 CRF：{crf()}</span>
+          <div class="range-row">
+            <input
+              type="range"
+              min="18"
+              max="28"
+              value={crf()}
+              onInput={(e) => setCrf(+e.currentTarget.value)}
+            />
+            <span class="range-val">{crf()}</span>
+          </div>
         </div>
       </Show>
 
-      <button class="btn" onClick={submit} disabled={busy()}>
-        {busy() ? "提交中…" : "开始转换"}
-      </button>
+      </div>
+
+      <div class="actions">
+        <button class="btn" onClick={submit} disabled={busy()}>
+          {busy() ? "提交中…" : "开始转换"}
+        </button>
+      </div>
     </div>
   );
 }

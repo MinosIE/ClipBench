@@ -65,8 +65,9 @@ export default function SplitPanel() {
         按固定时长切片，或自定义多段时间区间；输出可选择视频片段或 GIF。
       </p>
 
-      <div class="field">
-        <label>拆分方式</label>
+      <div class="form-card">
+        <div class="field">
+          <label>拆分方式</label>
         <div class="seg">
           <button
             class={mode() === "segment" ? "active" : ""}
@@ -148,7 +149,7 @@ export default function SplitPanel() {
             </button>
           </div>
         </div>
-        <label style={{ "font-size": "13px" }}>
+        <label class="check-row">
           <input
             type="checkbox"
             checked={mute()}
@@ -184,9 +185,13 @@ export default function SplitPanel() {
         </div>
       </Show>
 
-      <button class="btn" onClick={submit} disabled={busy()}>
-        {busy() ? "提交中…" : "开始拆分"}
-      </button>
+      </div>
+
+      <div class="actions">
+        <button class="btn" onClick={submit} disabled={busy()}>
+          {busy() ? "提交中…" : "开始拆分"}
+        </button>
+      </div>
     </div>
   );
 }

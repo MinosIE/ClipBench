@@ -1,5 +1,5 @@
 import { createSignal, Show, For } from "solid-js";
-import { files, pushToast, upsertTask } from "../../store";
+import { files, pushToast, upsertTask, faststartEnabled } from "../../store";
 import { mergeVideos } from "../../api";
 import { thumbUrl } from "../../api";
 
@@ -31,7 +31,7 @@ export default function MergePanel() {
     }
     setBusy(true);
     try {
-      const { task_id } = await mergeVideos(picked());
+      const { task_id } = await mergeVideos(picked(), faststartEnabled());
       upsertTask({
         task_id,
         name: `合并 ${picked().length} 个文件`,
@@ -58,7 +58,8 @@ export default function MergePanel() {
         when={files.length > 0}
         fallback={<div class="empty">暂无文件，请先上传</div>}
       >
-        <div class="pick-grid">
+        <div class="form-card">
+          <div class="pick-grid">
           <For each={files}>
             {(f) => (
               <div
@@ -86,7 +87,7 @@ export default function MergePanel() {
               {(name, i) => (
                 <div class="row">
                   <span class="badge">{i() + 1}</span>
-                  <span style={{ "flex:": "1", "min-width": "0" }}>{name}</span>
+                  <span style={{ flex: "1", "min-width": "0" }}>{name}</span>
                   <button
                     class="btn secondary small"
                     onClick={() => move(name, -1)}
@@ -107,9 +108,13 @@ export default function MergePanel() {
           </div>
         </Show>
 
-        <button class="btn" onClick={submit} disabled={busy()}>
-          {busy() ? "提交中…" : "开始合并"}
-        </button>
+        </div>
+
+        <div class="actions">
+          <button class="btn" onClick={submit} disabled={busy()}>
+            {busy() ? "提交中…" : "开始合并"}
+          </button>
+        </div>
       </Show>
     </div>
   );

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3a8dde"/>
+      <stop offset="1" stop-color="#2b6cb0"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bg)"/>
+  <!-- 裁剪框 -->
+  <rect x="16" y="16" width="32" height="32" rx="4" fill="none" stroke="#ffffff" stroke-width="3" stroke-dasharray="6 5"/>
+  <!-- 四角标记 -->
+  <g stroke="#ffffff" stroke-width="4" stroke-linecap="round" fill="none">
+    <path d="M16 26 V16 H26"/>
+    <path d="M38 16 H48 V26"/>
+    <path d="M48 38 V48 H38"/>
+    <path d="M26 48 H16 V38"/>
+  </g>
+  <!-- 中心点 -->
+  <circle cx="32" cy="32" r="3.2" fill="#ffffff"/>
+</svg>

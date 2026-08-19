@@ -12,6 +12,7 @@ import {
   deleteAllTasks,
   outputUrl,
   downloadDirUrl,
+  downloadFileUrl,
 } from "../api";
 
 const statusText: Record<string, string> = {
@@ -82,7 +83,8 @@ export default function Tasks() {
       confirmText: "清空",
       danger: true,
       onConfirm: async () => {
-        await deleteAllTasks();
+        const ids = tasks.map((t) => t.task_id);
+        await deleteAllTasks(ids);
         setTasks([]);
         setSelected(new Set());
         pushToast("已清空任务列表", "info");
@@ -171,12 +173,21 @@ export default function Tasks() {
                       </Show>
                     </div>
 
-                    <Show when={t.output_name}>
+                    <Show when={t.output_name && t.status === "finished"}>
                       <div class="task-result">
                         <a href={outputUrl(t.output_name!)} target="_blank">
                           查看单个结果
                         </a>
-                        <a href={downloadDirUrl(t.task_id)}>下载完整输出</a>
+                        <Show
+                          when={t.output_dir}
+                          fallback={
+                            <a href={downloadFileUrl(t.output_name!)}>
+                              下载结果
+                            </a>
+                          }
+                        >
+                          <a href={downloadDirUrl(t.task_id)}>下载完整输出</a>
+                        </Show>
                       </div>
                     </Show>
 

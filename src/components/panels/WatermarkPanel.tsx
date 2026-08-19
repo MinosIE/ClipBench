@@ -1,5 +1,5 @@
 import { createSignal, Show, For } from "solid-js";
-import { selectedId, pushToast, upsertTask } from "../../store";
+import { selectedId, pushToast, upsertTask, faststartEnabled } from "../../store";
 import { uploadWatermark, watermarkVideo } from "../../api";
 
 const POSITIONS = [
@@ -62,6 +62,7 @@ export default function WatermarkPanel() {
         alpha: alpha(),
         watermark_id: type() === "image" ? wmId() : undefined,
         scale_w: type() === "image" ? scaleW() : undefined,
+        faststart: faststartEnabled(),
       });
       upsertTask({
         task_id,
@@ -83,8 +84,9 @@ export default function WatermarkPanel() {
       <h2>水印</h2>
       <p class="muted">为视频添加文字或图片水印，支持 9 宫格位置与透明度。</p>
 
-      <div class="field">
-        <label>水印类型</label>
+      <div class="form-card">
+        <div class="field">
+          <label>水印类型</label>
         <div class="seg">
           <button
             class={type() === "text" ? "active" : ""}
@@ -142,14 +144,16 @@ export default function WatermarkPanel() {
         </div>
         <div class="field">
           <label>相对宽度(%)</label>
-          <input
-            type="range"
-            min="5"
-            max="80"
-            value={scaleW()}
-            onInput={(e) => setScaleW(+e.currentTarget.value)}
-          />
-          <span class="hint">当前 {scaleW()}%</span>
+          <div class="range-row">
+            <input
+              type="range"
+              min="5"
+              max="80"
+              value={scaleW()}
+              onInput={(e) => setScaleW(+e.currentTarget.value)}
+            />
+            <span class="range-val">{scaleW()}%</span>
+          </div>
         </div>
       </Show>
 
@@ -180,21 +184,28 @@ export default function WatermarkPanel() {
           />
         </div>
         <div class="field" style={{ "margin-bottom": "0" }}>
-          <label>透明度 {alpha().toFixed(2)}</label>
-          <input
-            type="range"
-            min="0.1"
-            max="1"
-            step="0.05"
-            value={alpha()}
-            onInput={(e) => setAlpha(+e.currentTarget.value)}
-          />
+          <label>透明度</label>
+          <div class="range-row">
+            <input
+              type="range"
+              min="0.1"
+              max="1"
+              step="0.05"
+              value={alpha()}
+              onInput={(e) => setAlpha(+e.currentTarget.value)}
+            />
+            <span class="range-val">{alpha().toFixed(2)}</span>
+          </div>
         </div>
       </div>
 
-      <button class="btn" onClick={submit} disabled={busy()}>
-        {busy() ? "提交中…" : "开始添加水印"}
-      </button>
+      </div>
+
+      <div class="actions">
+        <button class="btn" onClick={submit} disabled={busy()}>
+          {busy() ? "提交中…" : "开始添加水印"}
+        </button>
+      </div>
     </div>
   );
 }
