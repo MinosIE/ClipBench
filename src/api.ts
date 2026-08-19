@@ -4,11 +4,16 @@
 async function jsonFetch(url: string, init?: RequestInit) {
   const method = (init?.method ?? "GET").toUpperCase();
   const needsBody = method === "POST" || method === "PUT" || method === "PATCH";
-  // 写操作无 body 时，补上空 JSON 与 Content-Type，避免后端 415
-  const headers = {
-    "Content-Type": "application/json",
-    ...(init?.headers ?? {}),
-  };
+  // FormData（multipart 上传）必须让浏览器自动生成 Content-Type 与 boundary，
+  // 绝不能覆写为 application/json，否则后端 request.files 解析为空。
+  const isFormData = init?.body instanceof FormData;
+  const headers = isFormData
+    ? { ...(init?.headers ?? {}) }
+    : {
+        // 写操作无 body 时，补上空 JSON 与 Content-Type，避免后端 415
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      };
   const body = needsBody && init?.body == null ? "{}" : init?.body;
   const res = await fetch(url, { ...init, headers, body });
   if (!res.ok) {
@@ -247,6 +252,7 @@ export async function compressVideo(params: {
   preset: string;
   crf: number;
   scale: "original" | "1080" | "720" | "480";
+  vcodec?: "h264" | "hevc";
   faststart?: boolean;
 }): Promise<{ task_id: string }> {
   return jsonFetch("/api/compress", {

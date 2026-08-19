@@ -530,12 +530,16 @@ def api_version():
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
     if "file" not in request.files:
+        print("[upload] 400: request.files 中没有 file 字段", flush=True)
         return jsonify({"error": "未找到文件"}), 400
     f = request.files["file"]
     if f.filename == "":
+        print("[upload] 400: filename 为空", flush=True)
         return jsonify({"error": "文件名为空"}), 400
     if not allowed_file(f.filename):
+        print(f"[upload] 400: 扩展名不在白名单 filename={f.filename!r}", flush=True)
         return jsonify({"error": "不支持的文件类型"}), 400
+    print(f"[upload] 通过校验: filename={f.filename!r} content_length={f.content_length}", flush=True)
     filename = secure_filename(f.filename)
     # 避免重名
     stem = Path(filename).stem
@@ -1020,22 +1024,34 @@ def api_compress():
     scale = data.get("scale", "original")  # original | 1080 | 720 | 480
     faststart = bool(data.get("faststart", False))
     vcodec = (meta.get("video_codec") or "").lower()
-    # 源已是 HEVC(H.265) 时，强制转成 H.264 反而会让文件变大（H.264 压缩率更低、
-    # 且有损转码画质下降）。因此 HEVC 源继续用 libx265 重编码才能真正压缩。
-    # x265 同 CRF 比 x264 更保真，基础偏移 +6 才接近同视觉质量；若源视频码率本身已
-    # 很低（< 2Mbps，说明源已很省），再额外加大偏移，避免重新编码后文件反增。
-    if vcodec in ("hevc", "h265", "h.265"):
+    src_is_hevc = vcodec in ("hevc", "h265", "h.265")
+    # 输出编码：默认 h264 —— 所有浏览器(Chrome/Firefox/Safari/Edge)与设备都能播，
+    # 兼容性最好；可选 hevc —— 体积更小，但仅 Safari/iOS/部分浏览器可解码。
+    vcodec_out = (data.get("vcodec") or "h264").lower()
+    if vcodec_out == "hevc":
         enc = "libx265"
-        offset = 6 + (10 if int(meta.get("video_bitrate") or 0) < 2000000 else 0)
-        use_crf = crf + offset
         codec_label = "HEVC"
+        # HEVC 源同编码再压：x265 同 CRF 比 x264 更保真，基础偏移 +6 才接近同视觉
+        # 质量；源码率已很低(< 2Mbps)时再 +10，避免重新编码后文件反增。
+        # H.264→HEVC 转码本身更省空间，直接用用户 CRF 即可，无需偏移。
+        if src_is_hevc:
+            offset = 6 + (10 if int(meta.get("video_bitrate") or 0) < 2000000 else 0)
+            use_crf = crf + offset
+        else:
+            use_crf = crf
+        # libx265 默认输出 hev1 codec tag，Apple 播放器(QuickTime/Safari)解不出
+        # 画面(表现为只有音频)，强制 hvc1 保证 macOS/iOS 兼容。
+        force_tag = True
     else:
         enc = "libx264"
         use_crf = crf
         codec_label = "H.264"
+        force_tag = False
     out = OUTPUT_DIR / f"comp_{src.stem}_{int(time.time())}.mp4"
     args = ["-i", str(src), "-c:v", enc, "-preset", preset,
             "-crf", str(use_crf)]
+    if force_tag:
+        args += ["-tag:v", "hvc1"]
     if scale != "original":
         args += ["-vf", f"scale=-2:{scale}"]
     # 音频：源音频码率已低于 128k 时直接 copy，避免强行升码率导致文件反增；

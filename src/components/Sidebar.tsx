@@ -206,7 +206,7 @@ export default function Sidebar() {
         <input
           id="sidebar-file-input"
           type="file"
-          accept="video/*,image/*"
+          accept="video/*,audio/*"
           multiple
           style={{ display: "none" }}
           onChange={(e) => onUpload(e.currentTarget.files)}

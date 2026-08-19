@@ -92,7 +92,7 @@ export default function App() {
         ref={fileInput}
         type="file"
         multiple
-        accept="video/*,image/*,.gif"
+        accept="video/*,audio/*"
         style={{ display: "none" }}
         onChange={handleUpload}
       />
