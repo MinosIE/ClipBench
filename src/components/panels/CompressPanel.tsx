@@ -9,11 +9,11 @@ import {
 import { compressVideo, compressSuggest, CompressSuggestion } from "../../api";
 
 const PRESETS = [
-  { v: "veryslow", label: "极慢(最小)" },
-  { v: "slow", label: "慢" },
-  { v: "medium", label: "中" },
-  { v: "fast", label: "快" },
-  { v: "veryfast", label: "极快(最大)" },
+  { v: "veryslow", label: "极慢(最小)", desc: "编码最慢，同画质下压缩率最高、文件最小，适合不赶时间的一次性压制。" },
+  { v: "slow", label: "慢", desc: "较慢，压缩率次高，体积与耗时的折中偏压。" },
+  { v: "medium", label: "中", desc: "默认档，编码速度与压缩效率最平衡，日常首选。" },
+  { v: "fast", label: "快", desc: "较快，压缩率略低，同 CRF 下文件稍大，适合快速出片。" },
+  { v: "veryfast", label: "极快(最大)", desc: "最快，压缩率最低，同画质下文件最大，仅在对时间敏感时用。" },
 ] as const;
 
 const SCALES = [
@@ -179,17 +179,27 @@ export default function CompressPanel() {
 
         <div class="field col-span">
           <label>压缩预设</label>
-          <div class="seg">
-            <For each={PRESETS}>
-              {(p) => (
-                <button
-                  class={preset() === p.v ? "active" : ""}
-                  onClick={() => setPreset(p.v)}
-                >
-                  {p.label}
-                </button>
-              )}
-            </For>
+          <div class="preset-row">
+            <div class="seg">
+              <For each={PRESETS}>
+                {(p) => (
+                  <button
+                    class={preset() === p.v ? "active" : ""}
+                    onClick={() => setPreset(p.v)}
+                  >
+                    {p.label}
+                  </button>
+                )}
+              </For>
+            </div>
+            <div class="preset-info">
+              <div class="preset-info-title">
+                <b>{PRESETS.find((p) => p.v === preset())?.label ?? preset()}</b>
+              </div>
+              <p class="preset-info-desc">
+                {PRESETS.find((p) => p.v === preset())?.desc}
+              </p>
+            </div>
           </div>
         </div>
 
