@@ -23,6 +23,14 @@ const statusText: Record<string, string> = {
   cancelled: "已取消",
 };
 
+const presetLabels: Record<string, string> = {
+  veryslow: "极慢",
+  slow: "慢",
+  medium: "中",
+  fast: "快",
+  veryfast: "极快",
+};
+
 export default function Tasks() {
   const [selected, setSelected] = createSignal<Set<string>>(new Set());
 
@@ -204,6 +212,40 @@ export default function Tasks() {
                           </Show>
                         </div>
                       </div>
+                    </div>
+                  </Show>
+
+                  {/* 压缩参数（预设/CRF/编码/缩放），供回看任务时对照 */}
+                  <Show
+                    when={
+                      t.kind === "compress" &&
+                      (t.preset != null || t.crf != null)
+                    }
+                  >
+                    <div class="cc-params">
+                      <Show when={t.preset}>
+                        <span>预设 {presetLabels[t.preset!] ?? t.preset}</span>
+                      </Show>
+                      <Show when={t.crf != null}>
+                        <span
+                          title={
+                            t.crf_offset
+                              ? `用户输入 CRF ${t.user_crf}，HEVC 源二次压缩含 +${t.crf_offset} 偏移`
+                              : undefined
+                          }
+                        >
+                          CRF {t.crf}
+                          {t.crf_offset ? ` (+${t.crf_offset})` : ""}
+                        </span>
+                      </Show>
+                      <Show when={t.vcodec_out}>
+                        <span>{t.vcodec_out === "hevc" ? "HEVC" : "H.264"}</span>
+                      </Show>
+                      <Show when={t.scale}>
+                        <span>
+                          {t.scale === "original" ? "原分辨率" : `${t.scale}p`}
+                        </span>
+                      </Show>
                     </div>
                   </Show>
 

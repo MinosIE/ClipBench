@@ -1234,6 +1234,7 @@ def api_compress():
     # 输出编码：默认 h264 —— 所有浏览器(Chrome/Firefox/Safari/Edge)与设备都能播，
     # 兼容性最好；可选 hevc —— 体积更小，但仅 Safari/iOS/部分浏览器可解码。
     vcodec_out = (data.get("vcodec") or "h264").lower()
+    offset = 0
     if vcodec_out == "hevc":
         enc = "libx265"
         codec_label = "HEVC"
@@ -1275,6 +1276,13 @@ def api_compress():
         extra={
             "kind": "compress",
             "src_name": file_id,  # 源文件名称，用于任务卡片展示
+            # 压缩参数：回看任务时可直接对照
+            "preset": preset,
+            "crf": use_crf,  # 实际生效 CRF（含 HEVC 偏移）
+            "user_crf": crf,  # 用户输入的 CRF
+            "crf_offset": offset,  # 偏移量（HEVC 源二次压缩时 > 0）
+            "vcodec_out": vcodec_out,
+            "scale": scale,
             # 源信息：压缩完成后用于与输出做对比展示
             "src_size": int(meta.get("size") or 0),
             "src_size_human": meta.get("size_human", ""),

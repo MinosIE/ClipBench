@@ -75,6 +75,13 @@ export interface Task {
   out_resolution?: string;
   out_bitrate?: number;
   saving?: number;
+  // 压缩参数（提交任务时写入）
+  preset?: string;
+  crf?: number; // 实际生效 CRF（含 HEVC 偏移）
+  user_crf?: number; // 用户输入的 CRF
+  crf_offset?: number; // 偏移量（HEVC 源二次压缩时 > 0）
+  vcodec_out?: string;
+  scale?: string;
 }
 
 // ---------- 文件 ----------

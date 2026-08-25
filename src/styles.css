@@ -426,6 +426,21 @@ button {
 .cc-saving.good {
   color: var(--ok);
 }
+.cc-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+.cc-params span {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
 
 /* ---------- 主内容区（左右两栏） ---------- */
 .main {
