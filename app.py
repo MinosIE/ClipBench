@@ -1283,6 +1283,9 @@ def api_compress():
             "crf_offset": offset,  # 偏移量（HEVC 源二次压缩时 > 0）
             "vcodec_out": vcodec_out,
             "scale": scale,
+            # 时长信息：压缩为全片处理（无裁剪），用于回看时确认对比口径
+            "src_duration": float(meta.get("duration") or 0),  # 源总时长（秒）
+            "processed_duration": float(meta.get("duration") or 0),  # 实际处理时长（秒）
             # 源信息：压缩完成后用于与输出做对比展示
             "src_size": int(meta.get("size") or 0),
             "src_size_human": meta.get("size_human", ""),

@@ -31,6 +31,9 @@ const presetLabels: Record<string, string> = {
   veryfast: "极快",
 };
 
+const fmtDur = (s?: number) =>
+  s == null ? "" : s >= 60 ? `${(s / 60).toFixed(1)}分` : `${s.toFixed(1)}s`;
+
 export default function Tasks() {
   const [selected, setSelected] = createSignal<Set<string>>(new Set());
 
@@ -244,6 +247,18 @@ export default function Tasks() {
                       <Show when={t.scale}>
                         <span>
                           {t.scale === "original" ? "原分辨率" : `${t.scale}p`}
+                        </span>
+                      </Show>
+                      <Show when={t.processed_duration != null}>
+                        <span
+                          title={
+                            t.src_duration != null &&
+                            Math.abs(t.src_duration - t.processed_duration!) > 0.01
+                              ? `源总时长 ${fmtDur(t.src_duration)}，实际处理 ${fmtDur(t.processed_duration)}`
+                              : `源总时长 ${fmtDur(t.src_duration)}`
+                          }
+                        >
+                          时长 {fmtDur(t.processed_duration)}
                         </span>
                       </Show>
                     </div>

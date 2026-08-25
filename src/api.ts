@@ -82,6 +82,8 @@ export interface Task {
   crf_offset?: number; // 偏移量（HEVC 源二次压缩时 > 0）
   vcodec_out?: string;
   scale?: string;
+  src_duration?: number; // 源总时长（秒）
+  processed_duration?: number; // 实际处理时长（秒）
 }
 
 // ---------- 文件 ----------
