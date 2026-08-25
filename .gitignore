@@ -7,7 +7,7 @@ venv/
 env/
 
 # 运行时日志
-server.log
+*.log
 
 # 用户上传与生成产物（大二进制文件）
 uploads/*.mp4
