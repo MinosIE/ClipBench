@@ -60,6 +60,24 @@ _inpaint_sem = threading.BoundedSemaphore(_INPAINT_SLOTS)
 _inpaint_lock = threading.Lock()
 _inpaint_waiting = 0  # 当前正在等待闸门的任务数（用于 UI 提示）
 
+# ffmpeg 任务并发闸门：压缩/合并/拆分/转换/截图等转码均为 CPU 密集型，
+# 并行数超过核心数会互相抢核反而更慢。默认 = 逻辑核心数的一半（至少 1），
+# 可用环境变量 CLIPBENCH_FFMPEG_SLOTS 覆盖（例如设为 1 即完全串行）。
+def _default_ffmpeg_slots() -> int:
+    v = os.environ.get("CLIPBENCH_FFMPEG_SLOTS")
+    if v:
+        try:
+            return max(1, int(v))
+        except (TypeError, ValueError):
+            pass
+    return max(1, (os.cpu_count() or 2) // 2)
+
+
+_FFMPEG_SLOTS = _default_ffmpeg_slots()
+_ffmpeg_sem = threading.BoundedSemaphore(_FFMPEG_SLOTS)
+_ffmpeg_lock = threading.Lock()
+_ffmpeg_waiting = 0  # 当前正在等待闸门的任务数（用于 UI 提示）
+
 
 def inpaint_acquire(task_id):
     """inpaint 任务开始时调用：拿不到闸门就排队阻塞，并更新任务文案展示"排队中"。"""
@@ -82,6 +100,31 @@ def inpaint_acquire(task_id):
 def inpaint_release():
     try:
         _inpaint_sem.release()
+    except Exception:
+        pass
+
+
+def ffmpeg_acquire(task_id):
+    """ffmpeg 任务开始时调用：拿不到闸门就排队阻塞，并更新任务文案展示"排队中"。"""
+    global _ffmpeg_waiting
+    with _ffmpeg_lock:
+        _ffmpeg_waiting += 1
+    if _ffmpeg_waiting > _FFMPEG_SLOTS:
+        try:
+            t = TASKS.get(task_id)
+            if t:
+                t["status"] = "queued"
+                save_tasks()
+        except Exception:
+            pass
+    _ffmpeg_sem.acquire()
+    with _ffmpeg_lock:
+        _ffmpeg_waiting = max(0, _ffmpeg_waiting - 1)
+
+
+def ffmpeg_release():
+    try:
+        _ffmpeg_sem.release()
     except Exception:
         pass
 
@@ -433,8 +476,22 @@ def _finalize(args, out, faststart=False):
 
 
 def run_ffmpeg(args, task_id, workdir):
-    """执行 ffmpeg，将进度写入任务"""
+    """执行 ffmpeg，将进度写入任务（受并发闸门限流，排队时状态为 queued）"""
+    ffmpeg_acquire(task_id)
+    try:
+        _run_ffmpeg_locked(args, task_id, workdir)
+    finally:
+        ffmpeg_release()
+
+
+def _run_ffmpeg_locked(args, task_id, workdir):
+    """执行 ffmpeg，将进度写入任务（须已持有 ffmpeg 并发闸门）"""
     task = TASKS.get(task_id)
+    # 排队期间可能已被手动取消，拿到闸门后检查，取消则直接放弃
+    if task is None or task.get("status") == "cancelled":
+        return
+    task["status"] = "running"
+    save_tasks()
     cmd = [get_ffmpeg(), "-y", "-hide_banner", "-progress", "pipe:1"] + args
     try:
         proc = subprocess.Popen(
