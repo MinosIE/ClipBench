@@ -98,6 +98,29 @@ export default function CropPanel() {
 
   const clearRect = () => setRect({ x: 0, y: 0, w: 0, h: 0 });
 
+  // 按常用宽高比（如 9:16 / 1:1 / 16:9）居中框选
+  const applyRatio = (rw: number, rh: number) => {
+    const vw = info()?.width;
+    const vh = info()?.height;
+    if (!vw || !vh) {
+      pushToast("视频信息尚未加载，请稍候", "error");
+      return;
+    }
+    // 以视频完整宽度为基础，按比例算高度；超出则按高度回算
+    let w = vw;
+    let h = Math.round((w * rh) / rw);
+    if (h > vh) {
+      h = vh;
+      w = Math.round((h * rw) / rh);
+    }
+    setRect({
+      x: Math.round((vw - w) / 2),
+      y: Math.round((vh - h) / 2),
+      w,
+      h,
+    });
+  };
+
   const submit = async () => {
     if (!selectedId() || rect().w < 5 || rect().h < 5) {
       pushToast("请在视频上框选裁剪区域", "error");
@@ -131,65 +154,100 @@ export default function CropPanel() {
   return (
     <div class="tab-panel">
       <h2>裁剪</h2>
-      <p class="muted">在画面上拖拽框选保留区域；选中后可拖动调整位置，右上角 ✕ 删除选区。</p>
       <Show
         when={selectedId()}
         fallback={<div class="empty">请先在左侧选择一个视频</div>}
       >
-        <div class="form-card">
-          <div class="video-wrap" style={{ "max-width": "100%" }}>
-          <video
-            ref={videoRef}
-            src={uploadUrl(selectedId()!)}
-            controls
-            onMouseDown={onDownDraw}
-            style={{ cursor: "crosshair" }}
-          />
-          <Show when={hasRect()}>
-            <div
-              onMouseDown={onDownRegion}
-              style={{
-                position: "absolute",
-                left: pct(rect().x, info()?.width),
-                top: pct(rect().y, info()?.height),
-                width: pct(rect().w, info()?.width),
-                height: pct(rect().h, info()?.height),
-                border: "2px solid #4f8cff",
-                "background-color": "rgba(79,140,255,.18)",
-                cursor: "move",
-                "pointer-events": "auto",
-              }}
-            >
+        <div class="workbench crop-wb">
+          <div>
+            <div class="video-wrap">
+              <video
+                ref={videoRef}
+                src={uploadUrl(selectedId()!)}
+                controls
+                onMouseDown={onDownDraw}
+                style={{ cursor: "crosshair" }}
+              />
+              <Show when={hasRect()}>
+                <div
+                  onMouseDown={onDownRegion}
+                  style={{
+                    position: "absolute",
+                    left: pct(rect().x, info()?.width),
+                    top: pct(rect().y, info()?.height),
+                    width: pct(rect().w, info()?.width),
+                    height: pct(rect().h, info()?.height),
+                    border: "2px solid #4f8cff",
+                    "background-color": "rgba(79,140,255,.18)",
+                    cursor: "move",
+                    "pointer-events": "auto",
+                  }}
+                >
+                  <button
+                    class="crop-del"
+                    title="删除选区"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      clearRect();
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </Show>
+            </div>
+            <p class="hint">
+              在画面上按住拖拽框选保留区域；选中后可拖动调整位置，右上角 ✕ 删除选区。
+            </p>
+          </div>
+
+          <div class="region-tools">
+            <div class="field">
+              <label>当前选区</label>
+              <div class="region-list">
+                <div class="region-row">
+                  <span class="region-info">
+                    <span class="region-name">
+                      {hasRect() ? "已框选" : "未选择"}
+                    </span>
+                    <Show when={hasRect()} fallback="— 在左侧视频上拖拽框选">
+                      {Math.round(rect().w)}×{Math.round(rect().h)} @{" "}
+                      {Math.round(rect().x)},{Math.round(rect().y)}
+                    </Show>
+                    <span class="hint"> · 可直接拖动调整位置</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>常用比例</label>
+              <div class="seg">
+                <button onClick={() => setRect({ x: 0, y: 0, w: 0, h: 0 })}>
+                  清除
+                </button>
+                <button onClick={() => applyRatio(9, 16)}>9:16 竖屏</button>
+                <button onClick={() => applyRatio(1, 1)}>1:1 方图</button>
+                <button onClick={() => applyRatio(16, 9)}>16:9 横屏</button>
+              </div>
+            </div>
+
+            <div class="actions">
               <button
-                class="crop-del"
-                title="删除选区"
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                  clearRect();
-                }}
+                class="btn secondary"
+                onClick={clearRect}
+                disabled={!hasRect()}
               >
-                ✕
+                清除选区
+              </button>
+              <button class="btn" onClick={submit}>
+                开始裁剪
               </button>
             </div>
-          </Show>
-        </div>
-          <p class="hint">
-            当前选区：{Math.round(rect().w)}×{Math.round(rect().h)} @{" "}
-            {Math.round(rect().x)},{Math.round(rect().y)}
-          </p>
-        </div>
-
-        <div class="actions">
-          <button
-            class="btn secondary"
-            onClick={clearRect}
-            disabled={!hasRect()}
-          >
-            清除选区
-          </button>
-          <button class="btn" onClick={submit}>
-            开始裁剪
-          </button>
+            <p class="hint">
+              提示：选区太小（&lt;5px）会被忽略，请框选完整区域；竖屏 9:16、方图 1:1 适合社媒封面。
+            </p>
+          </div>
         </div>
       </Show>
     </div>

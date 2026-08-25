@@ -62,6 +62,19 @@ export interface Task {
   output_dir?: string;
   quality?: string;
   created_at: number;
+  // 压缩任务对比信息（后端完成后写入）
+  kind?: string;
+  src_name?: string;
+  src_size?: number;
+  src_size_human?: string;
+  src_codec?: string;
+  src_resolution?: string;
+  out_size?: number;
+  out_size_human?: string;
+  out_codec?: string;
+  out_resolution?: string;
+  out_bitrate?: number;
+  saving?: number;
 }
 
 // ---------- 文件 ----------
@@ -259,6 +272,39 @@ export async function compressVideo(params: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
+  });
+}
+
+// 压缩智能建议（由后端 suggest_compress 统一计算，前后端共用同一套逻辑）
+export interface CompressSuggestion {
+  codec_label: string;
+  src_is_hevc: boolean;
+  out_is_hevc: boolean;
+  rec_crf: number;
+  actual_crf: number;
+  rec_scale: string;
+  rec_scale_label: string;
+  est_saving: number;
+  est_up: boolean;
+  est_out_size: number;
+  est_out_human: string;
+  src_size: number;
+  src_size_human: string;
+  low_rate: boolean;
+  high_rate: boolean;
+  is_4k: boolean;
+  tips: string[];
+  summary: string;
+}
+
+export async function compressSuggest(
+  file_id: string,
+  vcodec: "h264" | "hevc"
+): Promise<CompressSuggestion> {
+  return jsonFetch("/api/compress_suggest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file_id, vcodec }),
   });
 }
 

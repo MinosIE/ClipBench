@@ -137,7 +137,7 @@ export default function App() {
           <Show
             when={getSelectedFile()}
             fallback={
-              <div class="panel" style={{ "text-align": "center" }}>
+              <div class="empty-state">
                 <h2>请先在左侧选择媒体文件</h2>
                 <p class="muted">
                   选中后即可使用拆分、截图、格式转换、压缩、裁剪、合并、旋转、
@@ -148,116 +148,120 @@ export default function App() {
           >
             {(file) => (
               <>
-                {/* 媒体信息卡片 */}
-                <div class="media-info">
-                  <img src={thumbUrl(file().name)} alt="thumb" />
-                  <div class="mi-body">
-                    <div class="mi-title">{file().name}</div>
-                    <div class="mi-meta">
-                      <span>
-                        <b>{file().width ?? "?"}</b> ×{" "}
-                        <b>{file().height ?? "?"}</b>
-                      </span>
-                      <span>大小 <b>{file().display_size ?? "—"}</b></span>
-                      <span>
-                        {file().is_video ? "视频" : "图片"}
-                        {file().fps ? ` · ${file().fps}fps` : ""}
-                      </span>
-                      <span>{formatName(file())}</span>
-                    </div>
-                    <Show when={file().is_video}>
-                      <div class="mi-codec">
-                        <span class="codec-tag">
-                          {file().video_codec ?? "—"}
+                {/* 左栏：媒体信息 + Tab 切换 + 功能面板 */}
+                <div class="main-left">
+                  <div class="media-info">
+                    <img src={thumbUrl(file().name)} alt="thumb" />
+                    <div class="mi-body">
+                      <div class="mi-title">{file().name}</div>
+                      <div class="mi-meta">
+                        <span>
+                          <b>{file().width ?? "?"}</b> ×{" "}
+                          <b>{file().height ?? "?"}</b>
                         </span>
-                        {file().duration != null ? (
-                          <span>
-                            时长 {Math.floor(file().duration / 60)}:
-                            {String(Math.floor(file().duration % 60)).padStart(2, "0")}
-                          </span>
-                        ) : null}
-                        {file().video_bitrate ? (
-                          <span>视频 {Math.round(file().video_bitrate / 1000)} kbps</span>
-                        ) : null}
-                        {file().audio_codec ? (
-                          <span class="codec-tag audio">
-                            {file().audio_codec}
-                            {file().audio_bitrate
-                              ? ` ${Math.round(file().audio_bitrate / 1000)}k`
-                              : ""}
-                          </span>
-                        ) : (
-                          <span>无音轨</span>
-                        )}
+                        <span>大小 <b>{file().display_size ?? "—"}</b></span>
+                        <span>
+                          {file().is_video ? "视频" : "图片"}
+                          {file().fps ? ` · ${file().fps}fps` : ""}
+                        </span>
+                        <span>{formatName(file())}</span>
                       </div>
+                      <Show when={file().is_video}>
+                        <div class="mi-codec">
+                          <span class="codec-tag">
+                            {file().video_codec ?? "—"}
+                          </span>
+                          {file().duration != null ? (
+                            <span>
+                              时长 {Math.floor(file().duration / 60)}:
+                              {String(Math.floor(file().duration % 60)).padStart(2, "0")}
+                            </span>
+                          ) : null}
+                          {file().video_bitrate ? (
+                            <span>视频 {Math.round(file().video_bitrate / 1000)} kbps</span>
+                          ) : null}
+                          {file().audio_codec ? (
+                            <span class="codec-tag audio">
+                              {file().audio_codec}
+                              {file().audio_bitrate
+                                ? ` ${Math.round(file().audio_bitrate / 1000)}k`
+                                : ""}
+                            </span>
+                          ) : (
+                            <span>无音轨</span>
+                          )}
+                        </div>
+                      </Show>
+                    </div>
+                  </div>
+
+                  {/* Tab 切换 */}
+                  <div class="tabs">
+                    <For each={TABS}>
+                      {(t) => (
+                        <button
+                          class="tab"
+                          classList={{ active: activeTab() === t.key }}
+                          onClick={() => setActiveTab(t.key)}
+                        >
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <For each={t.icon}>
+                              {(d) => <path d={d} />}
+                            </For>
+                          </svg>
+                          {t.label}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+
+                  {/* 功能面板 */}
+                  <div class="panel-scroll">
+                    <Show when={activeTab() === "desubtitle"}>
+                      <Workbench />
+                    </Show>
+                    <Show when={activeTab() === "split"}>
+                      <SplitPanel />
+                    </Show>
+                    <Show when={activeTab() === "screenshot"}>
+                      <ScreenshotPanel />
+                    </Show>
+                    <Show when={activeTab() === "convert"}>
+                      <ConvertPanel />
+                    </Show>
+                    <Show when={activeTab() === "compress"}>
+                      <CompressPanel />
+                    </Show>
+                    <Show when={activeTab() === "crop"}>
+                      <CropPanel />
+                    </Show>
+                    <Show when={activeTab() === "merge"}>
+                      <MergePanel />
+                    </Show>
+                    <Show when={activeTab() === "rotate"}>
+                      <RotatePanel />
+                    </Show>
+                    <Show when={activeTab() === "watermark"}>
+                      <WatermarkPanel />
+                    </Show>
+                    <Show when={activeTab() === "speed"}>
+                      <SpeedPanel />
                     </Show>
                   </div>
                 </div>
 
-                {/* Tab 切换 */}
-                <div class="tabs">
-                  <For each={TABS}>
-                    {(t) => (
-                      <button
-                        class="tab"
-                        classList={{ active: activeTab() === t.key }}
-                        onClick={() => setActiveTab(t.key)}
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        >
-                          <For each={t.icon}>
-                            {(d) => <path d={d} />}
-                          </For>
-                        </svg>
-                        {t.label}
-                      </button>
-                    )}
-                  </For>
-                </div>
-
-                {/* 功能面板 */}
-                <Show when={activeTab() === "desubtitle"}>
-                  <Workbench />
-                </Show>
-                <Show when={activeTab() === "split"}>
-                  <SplitPanel />
-                </Show>
-                <Show when={activeTab() === "screenshot"}>
-                  <ScreenshotPanel />
-                </Show>
-                <Show when={activeTab() === "convert"}>
-                  <ConvertPanel />
-                </Show>
-                <Show when={activeTab() === "compress"}>
-                  <CompressPanel />
-                </Show>
-                <Show when={activeTab() === "crop"}>
-                  <CropPanel />
-                </Show>
-                <Show when={activeTab() === "merge"}>
-                  <MergePanel />
-                </Show>
-                <Show when={activeTab() === "rotate"}>
-                  <RotatePanel />
-                </Show>
-                <Show when={activeTab() === "watermark"}>
-                  <WatermarkPanel />
-                </Show>
-                <Show when={activeTab() === "speed"}>
-                  <SpeedPanel />
-                </Show>
+                {/* 右栏：任务队列（常驻，始终可见） */}
+                <Tasks />
               </>
             )}
           </Show>
-
-          {/* 任务队列（原版位于主区右侧，此处置于主区底部，结构一致） */}
-          <Tasks />
         </main>
       </div>
 

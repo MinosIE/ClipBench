@@ -93,50 +93,45 @@ export default function Tasks() {
   };
 
   return (
-    <>
-      <Show when={tasks.length > 0}>
-        <div class="panel" style={{ position: "relative" }}>
-          <div
+    <aside class="tasks-pane">
+      <div class="tasks-pane-head">
+        <h2>
+          任务列表 <span class="badge">共 {tasks.length}</span>
+        </h2>
+        <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+          <label
             style={{
               display: "flex",
               "align-items": "center",
-              "justify-content": "space-between",
+              gap: "4px",
+              "font-size": "12px",
+              color: "var(--muted)",
             }}
           >
-            <h2>
-              任务列表 <span class="badge">共 {tasks.length}</span>
-            </h2>
-            <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
-              <label
-                style={{
-                  display: "flex",
-                  "align-items": "center",
-                  gap: "4px",
-                  "font-size": "12px",
-                  color: "var(--muted)",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={allSelected()}
-                  onChange={(e) => toggleSelectAll(e.currentTarget.checked)}
-                />
-                全选
-              </label>
-              <button
-                class="btn danger small"
-                disabled={selected().size === 0}
-                onClick={onBatchDelete}
-              >
-                批量删除{selected().size > 0 ? `(${selected().size})` : ""}
-              </button>
-              <button class="btn danger small" onClick={onDeleteAll}>
-                清空全部
-              </button>
-            </div>
-          </div>
+            <input
+              type="checkbox"
+              checked={allSelected()}
+              disabled={tasks.length === 0}
+              onChange={(e) => toggleSelectAll(e.currentTarget.checked)}
+            />
+            全选
+          </label>
+          <button
+            class="btn danger small"
+            disabled={selected().size === 0}
+            onClick={onBatchDelete}
+          >
+            批量删除{selected().size > 0 ? `(${selected().size})` : ""}
+          </button>
+          <button class="btn danger small" disabled={tasks.length === 0} onClick={onDeleteAll}>
+            清空全部
+          </button>
+        </div>
+      </div>
+      <div class="tasks-scroll">
+        <Show when={tasks.length > 0} fallback={<div class="empty">暂无任务，处理视频后会显示在这里</div>}>
           <div class="tasks">
-            <For each={tasks} fallback={<div class="empty">暂无任务</div>}>
+            <For each={tasks}>
               {(t) => (
                 <div class="task-card">
                   <div class="task-head">
@@ -153,6 +148,9 @@ export default function Tasks() {
                         {statusText[t.status] ?? t.status}
                       </span>
                     </div>
+                    <Show when={t.src_name}>
+                      <div class="task-src">源：{t.src_name}</div>
+                    </Show>
                   </div>
 
                   <div class="progress">
@@ -172,6 +170,53 @@ export default function Tasks() {
                         <span>耗时 {Math.round(t.elapsed!)}s</span>
                       </Show>
                     </div>
+
+                    {/* 压缩任务完成后的源/输出对比 */}
+                    <Show
+                      when={
+                        t.kind === "compress" &&
+                        t.status === "finished" &&
+                        t.out_size
+                      }
+                    >
+                      <div class="compress-compare">
+                        <div class="cc-col">
+                          <div class="cc-label">源</div>
+                          <div class="cc-size">{t.src_size_human || "—"}</div>
+                          <div class="cc-sub">
+                            <Show when={t.src_codec}>
+                              <span class="cc-codec">{t.src_codec}</span>
+                            </Show>
+                            <Show when={t.src_resolution}>
+                              <span>{t.src_resolution}</span>
+                            </Show>
+                          </div>
+                        </div>
+                        <div class="cc-mid">
+                          <div class="cc-arrow">→</div>
+                          <div
+                            class="cc-saving"
+                            classList={{ good: (t.saving ?? 0) > 0 }}
+                          >
+                            {t.saving != null
+                              ? `${t.saving > 0 ? "↓" : "↑"}${Math.abs(t.saving).toFixed(1)}%`
+                              : ""}
+                          </div>
+                        </div>
+                        <div class="cc-col cc-out">
+                          <div class="cc-label">输出</div>
+                          <div class="cc-size">{t.out_size_human || "—"}</div>
+                          <div class="cc-sub">
+                            <Show when={t.out_codec}>
+                              <span class="cc-codec">{t.out_codec}</span>
+                            </Show>
+                            <Show when={t.out_resolution}>
+                              <span>{t.out_resolution}</span>
+                            </Show>
+                          </div>
+                        </div>
+                      </div>
+                    </Show>
 
                     <Show when={t.output_name && t.status === "finished"}>
                       <div class="task-result">
@@ -218,8 +263,8 @@ export default function Tasks() {
               )}
             </For>
           </div>
-        </div>
-      </Show>
-    </>
+        </Show>
+      </div>
+    </aside>
   );
 }

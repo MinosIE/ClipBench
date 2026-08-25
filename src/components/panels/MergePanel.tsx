@@ -48,7 +48,7 @@ export default function MergePanel() {
   };
 
   return (
-    <div class="tab-panel">
+    <div class="tab-panel two-col">
       <h2>合并</h2>
       <p class="muted">
         勾选多个文件（按顺序从上到下拼接），可拖动顺序调整先后。
@@ -110,12 +110,26 @@ export default function MergePanel() {
 
         </div>
 
-        <div class="actions">
-          <button class="btn" onClick={submit} disabled={busy()}>
-            {busy() ? "提交中…" : "开始合并"}
-          </button>
-        </div>
       </Show>
+
+      <aside class="panel-aside">
+        <h4>合并贴士</h4>
+        <ul>
+          <li>勾选 ≥2 个文件即可合并，顺序即拼接顺序。</li>
+          <li>用 ↑ / ↓ 调整先后。</li>
+          <li>分辨率/编码不同的片段会自动统一为一种参数。</li>
+          <li>长视频建议先压缩再合并，更省时。</li>
+        </ul>
+        <div class="aside-note">
+          提示：先选素材再调顺序，避免漏选。
+        </div>
+      </aside>
+
+      <div class="actions">
+        <button class="btn" onClick={submit} disabled={busy()}>
+          {busy() ? "提交中…" : "开始合并"}
+        </button>
+      </div>
     </div>
   );
 }

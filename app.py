@@ -476,11 +476,36 @@ def run_ffmpeg(args, task_id, workdir):
     if proc.returncode == 0:
         task["status"] = "finished"
         task["progress"] = 100
+        # 压缩任务：完成后探测输出文件，记录对比信息（源 vs 输出）
+        if task.get("kind") == "compress" and task.get("output_name"):
+            _record_compress_result(task, Path(workdir) / task["output_name"])
     else:
         task["status"] = "failed"
         task["error"] = "\n".join(out_lines[-30:])[:2000]
     task["elapsed"] = int(time.time() - (task.get("created_at") or time.time()))
     save_tasks()
+
+
+def _record_compress_result(task: dict, out_path) -> None:
+    """压缩任务完成后，探测输出文件并记录源/输出对比信息（仅追加，不覆盖已有字段）。"""
+    try:
+        if not out_path.exists():
+            return
+        om = get_media_meta(str(out_path))
+        out_size = int(om.get("size") or 0)
+        src_size = int(task.get("src_size") or 0)
+        saving = 0.0
+        if src_size > 0 and out_size > 0:
+            saving = round((1 - out_size / src_size) * 100, 1)
+        res = f'{om.get("width")}x{om.get("height")}' if om.get("width") else ""
+        task["out_size"] = out_size
+        task["out_size_human"] = om.get("size_human", "")
+        task["out_codec"] = om.get("video_codec", "")
+        task["out_resolution"] = res
+        task["out_bitrate"] = om.get("video_bitrate", 0)
+        task["saving"] = saving
+    except Exception as e:
+        print(f"[compress] 记录对比信息失败: {e}", flush=True)
 
 
 def _generate_gif_clips(src, segments, fps, width, base, task_id, duration):
@@ -1011,6 +1036,130 @@ def api_convert():
     return jsonify({"task_id": task_id})
 
 
+def suggest_compress(meta: dict, vcodec_out: str) -> dict:
+    """压缩智能建议 + 预估的权威计算（前端智能建议的唯一来源，避免前后端两套阈值漂移）。
+
+    与 api_compress 使用同一套编码推导逻辑（CRF 偏移、编码选择）。
+    预估输出体积基于真实源码率，比前端经验公式更可信。
+    """
+    vcodec = (meta.get("video_codec") or "").lower()
+    src_is_hevc = vcodec in ("hevc", "h265", "h.265")
+    vb = int(meta.get("video_bitrate") or 0)
+    w = int(meta.get("width") or 0)
+    h = int(meta.get("height") or 0)
+    dur = float(meta.get("duration") or 0)
+    size = int(meta.get("size") or 0)
+
+    # 1) 推荐 CRF（与 api_compress 的偏移逻辑同源）
+    if vcodec_out == "hevc":
+        codec_label = "HEVC"
+        if src_is_hevc:
+            offset = 6 + (10 if vb < 2000000 else 0)
+            rec_crf = 22
+            actual_crf = rec_crf + offset
+        else:
+            rec_crf = 22
+            actual_crf = rec_crf
+    else:
+        codec_label = "H.264"
+        rec_crf = 23
+        actual_crf = rec_crf
+
+    # 2) 推荐分辨率（与前端原逻辑同源，但用真实分辨率判断）
+    is_4k = w >= 3000 or h >= 2000
+    is_1080 = (w >= 1600 or h >= 1000) and not is_4k
+    low_rate = vb > 0 and vb < 2000000
+    high_rate = vb >= 8000000
+    if is_4k:
+        rec_scale = "1080"
+    elif is_1080 and high_rate:
+        rec_scale = "720"
+    else:
+        rec_scale = "original"
+
+    # 3) 预估输出体积（经验，基于真实源码率）
+    src_area = w * h
+    target_area = src_area
+    if rec_scale == "1080":
+        target_area = 1920 * 1080
+    elif rec_scale == "720":
+        target_area = 1280 * 720
+    elif rec_scale == "480":
+        target_area = 854 * 480
+    scale_factor = target_area / src_area if src_area else 1
+    crf_factor = 2 ** ((23 - actual_crf) / 6)
+    codec_factor = 1.0
+    if vcodec_out == "hevc" and not src_is_hevc:
+        codec_factor = 0.6
+    elif vcodec_out == "h264" and src_is_hevc:
+        codec_factor = 1.6
+    vol_factor = scale_factor * crf_factor * codec_factor
+    vol_factor = max(0.03, min(1.6, vol_factor))
+    est_saving = round((1 - vol_factor) * 100)
+    if vb > 0 and dur > 0:
+        est_out_bytes = int(vb * vol_factor * dur / 8)
+    else:
+        est_out_bytes = int(size * vol_factor)
+
+    # 4) 建议文案（唯一来源，前端只负责渲染）
+    mbps = (vb / 1_000_000) if vb > 0 else None
+    scale_label = {"original": "原始分辨率", "1080": "1080p", "720": "720p", "480": "480p"}.get(rec_scale, "原始分辨率")
+    tips: list[str] = []
+    if low_rate:
+        tips.append(f"源码率仅 {mbps:.2f} Mbps，已很紧凑，建议轻微压缩或保持原画质")
+    elif high_rate:
+        tips.append(f"源码率 {mbps:.2f} Mbps，压缩空间大，可放心压到 CRF {rec_crf}")
+    else:
+        tips.append(f"质量滑块设为 {rec_crf} 可兼顾清晰度与体积")
+    if src_is_hevc and vcodec_out != "hevc":
+        tips.append("HEVC 源将转码为 H.264 以保证浏览器/设备通用播放，体积可能略有增大")
+    elif not src_is_hevc and vcodec_out == "hevc":
+        tips.append("H.264 源转 HEVC，体积可再减约 30%，但仅 Safari/部分设备可播")
+    elif src_is_hevc and vcodec_out == "hevc" and actual_crf != rec_crf:
+        tips.append(f"后端自动等效偏移 +{actual_crf - rec_crf}，实际编码 CRF ≈ {actual_crf}")
+    if is_4k:
+        tips.append("4K 源建议降到 1080p，体积可减 60% 以上，观感几乎不变")
+    elif rec_scale == "720":
+        tips.append("建议降到 720p，画质损失小，体积再减约 40%")
+    if dur > 600:
+        tips.append("长视频建议用「慢」或更高预设，编码更充分且文件更小")
+
+    # 条内一句话摘要（优先级：分辨率建议 > 码率提示 > 转码说明）
+    if is_4k:
+        summary = "4K 源建议降到 1080p，体积可减 60% 以上"
+    elif rec_scale == "720":
+        summary = "建议降到 720p，体积再减约 40%"
+    elif low_rate:
+        summary = f"源码率仅 {mbps:.2f} Mbps，建议轻微压缩或保持原画质"
+    elif high_rate:
+        summary = f"源码率 {mbps:.2f} Mbps，可放心压到 CRF {rec_crf}"
+    elif src_is_hevc and vcodec_out != "hevc":
+        summary = f"转 H.264 保证浏览器通用，CRF {rec_crf} 兼顾体积"
+    else:
+        summary = f"设为 CRF {rec_crf} 可兼顾清晰度与体积"
+
+    return {
+        "codec_label": codec_label,
+        "src_is_hevc": src_is_hevc,
+        "out_is_hevc": vcodec_out == "hevc",
+        "rec_crf": rec_crf,
+        "actual_crf": actual_crf,
+        "rec_scale": rec_scale,
+        "rec_scale_label": scale_label,
+        "est_saving": est_saving,
+        "est_up": est_saving < 0,
+        "est_out_size": est_out_bytes,
+        "est_out_human": human_size(est_out_bytes),
+        "src_size": size,
+        "src_size_human": meta.get("size_human", ""),
+        "low_rate": low_rate,
+        "high_rate": high_rate,
+        "is_4k": is_4k,
+        "tips": tips,
+        "summary": summary,
+    }
+
+
 @app.route("/api/compress", methods=["POST"])
 def api_compress():
     data = request.json
@@ -1062,11 +1211,37 @@ def api_compress():
     else:
         args += ["-c:a", "aac", "-b:a", "128k"]
     args = _finalize(args, out, faststart)
-    task_id = new_task(f"压缩 {codec_label} (CRF {use_crf})", duration=meta.get("duration", 0))
-    TASKS[task_id]["output_name"] = out.name
-    save_tasks()
+    task_id = new_task(
+        f"压缩 {codec_label} (CRF {use_crf})",
+        duration=meta.get("duration", 0),
+        output_name=out.name,
+        extra={
+            "kind": "compress",
+            "src_name": file_id,  # 源文件名称，用于任务卡片展示
+            # 源信息：压缩完成后用于与输出做对比展示
+            "src_size": int(meta.get("size") or 0),
+            "src_size_human": meta.get("size_human", ""),
+            "src_codec": meta.get("video_codec", ""),
+            "src_resolution": f'{meta.get("width")}x{meta.get("height")}'
+            if meta.get("width")
+            else "",
+        },
+    )
     start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
     return jsonify({"task_id": task_id})
+
+
+@app.route("/api/compress_suggest", methods=["POST"])
+def api_compress_suggest():
+    """返回压缩智能建议与预估（前端智能建议的唯一权威来源）。"""
+    data = request.json or {}
+    file_id = secure_filename(data.get("file_id", ""))
+    src = UPLOAD_DIR / file_id
+    if not src.exists():
+        return jsonify({"error": "源文件不存在"}), 404
+    meta = get_media_meta(str(src))
+    vcodec_out = (data.get("vcodec") or "h264").lower()
+    return jsonify(suggest_compress(meta, vcodec_out))
 
 
 @app.route("/api/crop", methods=["POST"])

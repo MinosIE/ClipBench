@@ -80,12 +80,12 @@ export default function WatermarkPanel() {
   };
 
   return (
-    <div class="tab-panel">
+    <div class="tab-panel two-col">
       <h2>水印</h2>
       <p class="muted">为视频添加文字或图片水印，支持 9 宫格位置与透明度。</p>
 
       <div class="form-card">
-        <div class="field">
+        <div class="field col-span">
           <label>水印类型</label>
         <div class="seg">
           <button
@@ -200,6 +200,19 @@ export default function WatermarkPanel() {
       </div>
 
       </div>
+
+      <aside class="panel-aside">
+        <h4>排版建议</h4>
+        <ul>
+          <li>位置选<b>右下角</b>最不遮挡主体，是平台惯例。</li>
+          <li>透明度 0.6~0.8 既可见又不抢戏。</li>
+          <li>文字水印字号建议画面的 1/30 左右。</li>
+          <li>图片水印相对宽度 15%~25% 较克制。</li>
+        </ul>
+        <div class="aside-note">
+          提示：边距越大，水印离画面边缘越远，更显精致。
+        </div>
+      </aside>
 
       <div class="actions">
         <button class="btn" onClick={submit} disabled={busy()}>

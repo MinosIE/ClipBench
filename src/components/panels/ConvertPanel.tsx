@@ -50,12 +50,12 @@ export default function ConvertPanel() {
   };
 
   return (
-    <div class="tab-panel">
+    <div class="tab-panel two-col">
       <h2>格式转换</h2>
       <p class="muted">将视频转换为目标封装/编码格式，或单独抽取音频。</p>
 
       <div class="form-card">
-        <div class="field">
+        <div class="field col-span">
           <label>目标格式</label>
         <select
           value={target()}
@@ -81,7 +81,7 @@ export default function ConvertPanel() {
           </select>
         </div>
 
-        <div class="field">
+        <div class="field col-span">
           <label>质量 (CRF，越小越好，18~28)</label>
           <div class="range-row">
             <input
@@ -97,6 +97,20 @@ export default function ConvertPanel() {
       </Show>
 
       </div>
+
+      <aside class="panel-aside">
+        <h4>格式速查</h4>
+        <ul>
+          <li><b>MP4/H.264</b>：兼容性最佳，通用首选。</li>
+          <li><b>MKV</b>：封装自由，适合多音轨/字幕。</li>
+          <li><b>WebM/VP9</b>：网页友好，体积更小。</li>
+          <li><b>MOV</b>：苹果生态编辑首选。</li>
+          <li><b>MP3/M4A</b>：仅抽取音频。</li>
+        </ul>
+        <div class="aside-note">
+          选「直接复制」可秒级封装，但不改变编码与体积。
+        </div>
+      </aside>
 
       <div class="actions">
         <button class="btn" onClick={submit} disabled={busy()}>

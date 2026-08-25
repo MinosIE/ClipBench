@@ -42,12 +42,12 @@ export default function SpeedPanel() {
   };
 
   return (
-    <div class="tab-panel">
+    <div class="tab-panel two-col">
       <h2>调速 / 倒放</h2>
       <p class="muted">调整播放速度（0.5x ~ 4x），或生成倒放视频。</p>
 
       <div class="form-card">
-        <div class="field">
+        <div class="field col-span">
           <label>速度倍率</label>
         <div class="seg">
           <For each={presets}>
@@ -83,7 +83,24 @@ export default function SpeedPanel() {
         倒放
       </label>
 
+      <p class="hint col-span">
+        加速（&gt;1x）丢弃部分帧、文件变小；减速（&lt;1x）复制帧、体积增大。慢动作选 0.5x，长视频摘要选 2x~4x。
+      </p>
+
       </div>
+
+      <aside class="panel-aside">
+        <h4>说明</h4>
+        <ul>
+          <li>加速（&gt;1x）会丢弃部分帧，文件变小、更流畅。</li>
+          <li>减速（&lt;1x）会复制帧，体积增大、动作变慢。</li>
+          <li>倒放需重新编码，无法用「复制」模式。</li>
+          <li>2x / 4x 常用于教程快进、卡点剪辑。</li>
+        </ul>
+        <div class="aside-note">
+          建议：慢动作选 0.5x，长视频摘要选 2x~4x。
+        </div>
+      </aside>
 
       <div class="actions">
         <button class="btn" onClick={submit} disabled={busy()}>
