@@ -57,10 +57,10 @@ export default function CompressPanel() {
   const applySuggestion = () => {
     const s = suggestion();
     if (!s) return;
-    setCrf(s.recCrf);
-    if (s.recScale !== "original") setScale(s.recScale as typeof scale);
-    const parts = [`CRF ${s.recCrf}`];
-    if (s.recScale !== "original") parts.push(s.rec_scale_label);
+    setCrf(s.rec_crf);
+    if (s.rec_scale !== "original") setScale(s.rec_scale as typeof scale);
+    const parts = [`CRF ${s.rec_crf}`];
+    if (s.rec_scale !== "original") parts.push(s.rec_scale_label);
     pushToast(`已应用：${parts.join(" · ")}，可再微调`, "info");
   };
 

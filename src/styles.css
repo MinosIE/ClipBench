@@ -358,13 +358,14 @@ button {
   padding: 22px;
 }
 
-/* 压缩任务：源 vs 输出对比条 */
+/* 压缩任务：源 vs 输出对比条（独占整行，撑满任务卡片宽度） */
 .compress-compare {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 8px;
-  margin: 10px 0 2px;
+  width: 100%;
+  margin: 4px 0 2px;
   padding: 10px 12px;
   background: var(--bg);
   border: 1px solid var(--border);

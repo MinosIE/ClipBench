@@ -160,6 +160,53 @@ export default function Tasks() {
                     />
                   </div>
 
+                  {/* 压缩任务完成后的源/输出对比（独占一行，撑满卡片宽度） */}
+                  <Show
+                    when={
+                      t.kind === "compress" &&
+                      t.status === "finished" &&
+                      t.out_size
+                    }
+                  >
+                    <div class="compress-compare">
+                      <div class="cc-col">
+                        <div class="cc-label">源</div>
+                        <div class="cc-size">{t.src_size_human || "—"}</div>
+                        <div class="cc-sub">
+                          <Show when={t.src_codec}>
+                            <span class="cc-codec">{t.src_codec}</span>
+                          </Show>
+                          <Show when={t.src_resolution}>
+                            <span>{t.src_resolution}</span>
+                          </Show>
+                        </div>
+                      </div>
+                      <div class="cc-mid">
+                        <div class="cc-arrow">→</div>
+                        <div
+                          class="cc-saving"
+                          classList={{ good: (t.saving ?? 0) > 0 }}
+                        >
+                          {t.saving != null
+                            ? `${t.saving > 0 ? "↓" : "↑"}${Math.abs(t.saving).toFixed(1)}%`
+                            : ""}
+                        </div>
+                      </div>
+                      <div class="cc-col cc-out">
+                        <div class="cc-label">输出</div>
+                        <div class="cc-size">{t.out_size_human || "—"}</div>
+                        <div class="cc-sub">
+                          <Show when={t.out_codec}>
+                            <span class="cc-codec">{t.out_codec}</span>
+                          </Show>
+                          <Show when={t.out_resolution}>
+                            <span>{t.out_resolution}</span>
+                          </Show>
+                        </div>
+                      </div>
+                    </div>
+                  </Show>
+
                   <div class="task-line">
                     <div class="task-meta">
                       <span>{Math.round(t.progress ?? 0)}%</span>
@@ -170,53 +217,6 @@ export default function Tasks() {
                         <span>耗时 {Math.round(t.elapsed!)}s</span>
                       </Show>
                     </div>
-
-                    {/* 压缩任务完成后的源/输出对比 */}
-                    <Show
-                      when={
-                        t.kind === "compress" &&
-                        t.status === "finished" &&
-                        t.out_size
-                      }
-                    >
-                      <div class="compress-compare">
-                        <div class="cc-col">
-                          <div class="cc-label">源</div>
-                          <div class="cc-size">{t.src_size_human || "—"}</div>
-                          <div class="cc-sub">
-                            <Show when={t.src_codec}>
-                              <span class="cc-codec">{t.src_codec}</span>
-                            </Show>
-                            <Show when={t.src_resolution}>
-                              <span>{t.src_resolution}</span>
-                            </Show>
-                          </div>
-                        </div>
-                        <div class="cc-mid">
-                          <div class="cc-arrow">→</div>
-                          <div
-                            class="cc-saving"
-                            classList={{ good: (t.saving ?? 0) > 0 }}
-                          >
-                            {t.saving != null
-                              ? `${t.saving > 0 ? "↓" : "↑"}${Math.abs(t.saving).toFixed(1)}%`
-                              : ""}
-                          </div>
-                        </div>
-                        <div class="cc-col cc-out">
-                          <div class="cc-label">输出</div>
-                          <div class="cc-size">{t.out_size_human || "—"}</div>
-                          <div class="cc-sub">
-                            <Show when={t.out_codec}>
-                              <span class="cc-codec">{t.out_codec}</span>
-                            </Show>
-                            <Show when={t.out_resolution}>
-                              <span>{t.out_resolution}</span>
-                            </Show>
-                          </div>
-                        </div>
-                      </div>
-                    </Show>
 
                     <Show when={t.output_name && t.status === "finished"}>
                       <div class="task-result">
