@@ -242,7 +242,18 @@ export default function Tasks() {
                         </span>
                       </Show>
                       <Show when={t.vcodec_out}>
-                        <span>{t.vcodec_out === "hevc" ? "HEVC" : "H.264"}</span>
+                        <span
+                          class={
+                            t.vcodec_out === "hevc" ? "cc-warn-tag" : ""
+                          }
+                          title={
+                            t.vcodec_out === "hevc"
+                              ? "HEVC 在 Chrome/Edge/Firefox 的 <video> 标签中无法播放，仅 Safari/QuickTime 等系统播放器支持"
+                              : undefined
+                          }
+                        >
+                          {t.vcodec_out === "hevc" ? "HEVC ⚠" : "H.264"}
+                        </span>
                       </Show>
                       <Show when={t.scale}>
                         <span>

@@ -441,6 +441,11 @@ button {
   padding: 2px 8px;
   white-space: nowrap;
 }
+.cc-params span.cc-warn-tag {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: rgba(255, 80, 80, 0.08);
+}
 
 /* ---------- 主内容区（左右两栏） ---------- */
 .main {

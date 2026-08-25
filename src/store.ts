@@ -89,8 +89,9 @@ export const [busy, setBusy] = createSignal(false); // 上传/提交中
 export const [activeTab, setActiveTab] = createSignal<TabKey>("desubtitle");
 export const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false);
 // 全局偏好：输出 MP4/MOV 时追加 -movflags +faststart（便于网络流式播放）
+// 默认开启——压缩后能直接拖进 <video> 标签播放是基础能力；用户可手动关闭。
 export const [faststartEnabled, setFaststartEnabled] = createSignal<boolean>(
-  localStorage.getItem("cb_faststart") === "1"
+  localStorage.getItem("cb_faststart") !== "0"
 );
 export function toggleFaststart() {
   const next = !faststartEnabled();
