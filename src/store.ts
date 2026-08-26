@@ -146,6 +146,12 @@ export function toggleShowOutputs() {
   localStorage.setItem("cb_show_outputs", next ? "1" : "0");
 }
 
+// 顶栏 ffmpeg 检测状态：checking=检测中 / ok=可用 / missing=未检测到
+export const [ffmpegStatus, setFfmpegStatus] = createSignal<
+  "checking" | "ok" | "missing"
+>("checking");
+export const [ffmpegVersion, setFfmpegVersion] = createSignal<string>("");
+
 export interface ModalState {
   title: string;
   message: string;

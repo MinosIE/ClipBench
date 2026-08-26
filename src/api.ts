@@ -149,6 +149,12 @@ function mapFile(raw: any): StoredFile {
   };
 }
 
+/** 获取后端 ffmpeg 版本（形如 "ffmpeg version 6.1.1 Copyright ..."，缺失时返回"未检测到 ffmpeg"） */
+export async function fetchFFmpegVersion(): Promise<string> {
+  const data = await jsonFetch("/api/version");
+  return typeof data?.ffmpeg === "string" ? data.ffmpeg : "";
+}
+
 export async function listFiles(opts: {
   includeOutputs?: boolean;
 } = {}): Promise<StoredFile[]> {

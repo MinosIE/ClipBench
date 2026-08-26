@@ -21,8 +21,12 @@ import {
   toggleFaststart,
   showOutputs,
   toggleShowOutputs,
+  ffmpegStatus,
+  setFfmpegStatus,
+  ffmpegVersion,
+  setFfmpegVersion,
 } from "./store";
-import { uploadFile, thumbUrl } from "./api";
+import { uploadFile, thumbUrl, fetchFFmpegVersion } from "./api";
 import Sidebar, { refreshFiles } from "./components/Sidebar";
 import Workbench from "./components/Workbench";
 import Tasks from "./components/Tasks";
@@ -60,7 +64,24 @@ export default function App() {
   onMount(() => {
     startSSE();
     refreshFiles();
+    checkFFmpeg();
   });
+
+  async function checkFFmpeg() {
+    try {
+      const v = await fetchFFmpegVersion();
+      // 后端返回形如 "ffmpeg version 6.1.1 Copyright ..."，缺失时返回"未检测到 ffmpeg"
+      if (v && !v.includes("未检测到")) {
+        const m = v.match(/ffmpeg version (\S+)/i);
+        setFfmpegVersion(m ? m[1] : v);
+        setFfmpegStatus("ok");
+      } else {
+        setFfmpegStatus("missing");
+      }
+    } catch {
+      setFfmpegStatus("missing");
+    }
+  }
 
   async function handleUpload(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
@@ -105,7 +126,24 @@ export default function App() {
           <div class="brand-logo">🎬</div>
           <div>
             <div class="brand-title">ClipBench</div>
-            <div class="brand-sub">本地视频处理工作台 · ffmpeg 检测中…</div>
+            <div class="brand-sub">
+              本地视频处理工作台
+              <Show
+                when={ffmpegStatus() === "ok"}
+                fallback={
+                  <span
+                    class="ffmpeg-badge"
+                    classList={{ missing: ffmpegStatus() === "missing" }}
+                  >
+                    {ffmpegStatus() === "checking"
+                      ? "ffmpeg 检测中…"
+                      : "未检测到 ffmpeg"}
+                  </span>
+                }
+              >
+                <span class="ffmpeg-badge ok">ffmpeg {ffmpegVersion()}</span>
+              </Show>
+            </div>
           </div>
         </div>
         <div class="topbar-actions">

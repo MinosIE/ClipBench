@@ -81,6 +81,28 @@ button {
 .brand-sub {
   font-size: 12px;
   color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ffmpeg-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.ffmpeg-badge.ok {
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.12);
+}
+.ffmpeg-badge.missing {
+  color: var(--danger);
+  background: rgba(220, 38, 38, 0.1);
+}
+.ffmpeg-badge:not(.ok):not(.missing) {
+  color: var(--muted);
+  background: rgba(120, 130, 150, 0.12);
 }
 .topbar-actions {
   display: flex;
