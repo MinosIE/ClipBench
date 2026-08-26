@@ -36,6 +36,7 @@ const fmtDur = (s?: number) =>
 
 export default function Tasks() {
   const [selected, setSelected] = createSignal<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = createSignal(false);
 
   const toggleSelect = (id: string, checked: boolean) => {
     setSelected((prev) => {
@@ -104,42 +105,66 @@ export default function Tasks() {
   };
 
   return (
-    <aside class="tasks-pane">
+    <aside class="tasks-pane" classList={{ collapsed: collapsed() }}>
       <div class="tasks-pane-head">
-        <h2>
-          任务列表 <span class="badge">共 {tasks.length}</span>
-        </h2>
-        <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
-          <label
-            style={{
-              display: "flex",
-              "align-items": "center",
-              gap: "4px",
-              "font-size": "12px",
-              color: "var(--muted)",
-            }}
+        <Show when={!collapsed()}>
+          <h2>
+            任务列表 <span class="badge">共 {tasks.length}</span>
+          </h2>
+        </Show>
+        <Show when={collapsed()}>
+          <span class="collapsed-title">任务列表</span>
+        </Show>
+        <Show when={!collapsed()}>
+          <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+            <label
+              style={{
+                display: "flex",
+                "align-items": "center",
+                gap: "4px",
+                "font-size": "12px",
+                color: "var(--muted)",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={allSelected()}
+                disabled={tasks.length === 0}
+                onChange={(e) => toggleSelectAll(e.currentTarget.checked)}
+              />
+              全选
+            </label>
+            <button
+              class="btn danger small"
+              disabled={selected().size === 0}
+              onClick={onBatchDelete}
+            >
+              删除
+            </button>
+            <button class="btn danger small" disabled={tasks.length === 0} onClick={onDeleteAll}>
+              清空
+            </button>
+          </div>
+        </Show>
+        <button
+          class="icon-btn"
+          title={collapsed() ? "展开任务列表" : "折叠任务列表"}
+          onClick={() => setCollapsed((c) => !c)}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
           >
-            <input
-              type="checkbox"
-              checked={allSelected()}
-              disabled={tasks.length === 0}
-              onChange={(e) => toggleSelectAll(e.currentTarget.checked)}
-            />
-            全选
-          </label>
-          <button
-            class="btn danger small"
-            disabled={selected().size === 0}
-            onClick={onBatchDelete}
-          >
-            批量删除{selected().size > 0 ? `(${selected().size})` : ""}
-          </button>
-          <button class="btn danger small" disabled={tasks.length === 0} onClick={onDeleteAll}>
-            清空全部
-          </button>
-        </div>
+            <path d={collapsed() ? "M15 18l-6-6 6-6" : "M9 18l6-6-6-6"} />
+          </svg>
+        </button>
       </div>
-      <div class="tasks-scroll">
+      <Show when={!collapsed()}>
+        <div class="tasks-scroll">
         <Show when={tasks.length > 0} fallback={<div class="empty">暂无任务，处理视频后会显示在这里</div>}>
           <div class="tasks">
             <For each={tasks}>
@@ -378,7 +403,8 @@ export default function Tasks() {
             </For>
           </div>
         </Show>
-      </div>
+        </div>
+      </Show>
     </aside>
   );
 }

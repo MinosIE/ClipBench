@@ -37,6 +37,7 @@ export async function refreshFiles() {
 
 export default function Sidebar() {
   const [drag, setDrag] = createSignal(false);
+  const [collapsed, setCollapsed] = createSignal(false);
 
   // 侧栏底部 dropzone 拖拽上传（顶栏也有「+ 上传文件」入口）
   const onUpload = async (fileList: FileList | null) => {
@@ -92,16 +93,41 @@ export default function Sidebar() {
   };
 
   return (
-    <aside class="sidebar">
+    <aside class="sidebar" classList={{ collapsed: collapsed() }}>
       <div class="sidebar-head">
-        <h3>媒体文件</h3>
-        <button
-          class="icon-btn"
-          title="刷新"
-          onClick={() => refreshFiles()}
-        >
-          ⟳
-        </button>
+        <Show when={!collapsed()}>
+          <h3>媒体文件</h3>
+        </Show>
+        <Show when={collapsed()}>
+          <span class="collapsed-title">媒体文件</span>
+        </Show>
+        <div class="head-actions">
+          <Show when={!collapsed()}>
+            <button
+              class="icon-btn"
+              title="刷新"
+              onClick={() => refreshFiles()}
+            >
+              ⟳
+            </button>
+          </Show>
+          <button
+            class="icon-btn"
+            title={collapsed() ? "展开媒体文件" : "折叠媒体文件"}
+            onClick={() => setCollapsed((c) => !c)}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d={collapsed() ? "M9 18l6-6-6-6" : "M15 18l-6-6 6-6"} />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div class="bulkbar">

@@ -14,6 +14,22 @@
 
 ## 已提交记录
 
+### 2026-08-26 — 左右栏折叠功能（含细节打磨）
+- 提交哈希：`待提交后回填`
+- 涉及文件：`src/components/Sidebar.tsx`、`src/components/Tasks.tsx`、`src/styles.css`、`docs/CHANGELOG.md`
+
+**折叠功能**
+- 左侧「媒体文件」head 新增折叠按钮（chevron ◀）：点击后侧栏收缩为 40px 窄条，主区自动占据空出的空间；再点展开恢复。
+- 右侧「任务列表」head 新增折叠按钮（chevron ▶）：点击后收为 40px 窄条，中间面板自动撑满；再点展开恢复。
+- 折叠态用 `.sidebar.collapsed` / `.tasks-pane.collapsed`：宽度收缩 + 内部内容隐藏 + head 居中 + `width 0.18s` 过渡动画。
+- 折叠时任务/文件数据不丢失，展开即恢复原状。
+
+**细节打磨**
+- 左侧 head 的刷新 ⟳ 与折叠按钮包进 `.head-actions`（flex + gap 6px），与标题 space-between 分布，两图标紧凑相邻不再割裂。
+- 右侧「任务列表」head 按钮精简为「删除」「清空」两字（去掉「批量删除(N)」「清空全部」长文案），`flex-wrap: nowrap` 保证整行不换行。
+- 折叠后窄条不再空白：head 改为纵向布局，中间竖排显示「媒体文件 / 任务列表」标题（`writing-mode: vertical-rl`，`flex: 1` 撑满）。
+- 折叠态展开按钮 `order: 1` 置顶（标题 `order: 2` 在其下撑满），避免按钮被挤到底部、交互别扭；head 加 `gap: 10px` 让按钮与竖排标题保持间距。
+
 ### 2026-08-26 — 合并功能全面增强 + 各面板表单布局统一
 - 提交哈希：`f79e899`
 - 涉及文件：`app.py`、`src/api.ts`、`src/components/Tasks.tsx`、`src/components/panels/MergePanel.tsx`、`src/components/panels/ConvertPanel.tsx`、`src/components/panels/RotatePanel.tsx`、`src/components/panels/ScreenshotPanel.tsx`、`src/components/panels/SpeedPanel.tsx`、`src/components/panels/SplitPanel.tsx`、`src/components/panels/WatermarkPanel.tsx`、`src/styles.css`、`tests/test_app.py`、`docs/CHANGELOG.md`（新增）

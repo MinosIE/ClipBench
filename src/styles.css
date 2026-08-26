@@ -210,8 +210,45 @@ button {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: width 0.18s ease;
 }
 .sidebar-hidden {
+  display: none;
+}
+/* 折叠态：只留一条窄条（竖排标题 + 底部展开按钮），主区自动占据空出的空间 */
+.sidebar.collapsed {
+  width: 40px;
+}
+.sidebar.collapsed .sidebar-head {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  flex: 1;
+  padding: 10px 0;
+  gap: 10px;
+  border-bottom: none;
+}
+.sidebar.collapsed .sidebar-head .collapsed-title {
+  order: 2;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: var(--muted);
+  user-select: none;
+  white-space: nowrap;
+}
+.sidebar.collapsed .sidebar-head .head-actions {
+  order: 1;
+}
+.sidebar.collapsed .sidebar-head .icon-btn:not(:last-child) {
+  display: none;
+}
+.sidebar.collapsed .bulkbar,
+.sidebar.collapsed .file-list,
+.sidebar.collapsed .dropzone {
   display: none;
 }
 
@@ -227,6 +264,11 @@ button {
   margin: 0;
   font-size: 14px;
   font-weight: 700;
+}
+.sidebar-head .head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .icon-btn {
   background: var(--panel-2);
@@ -1343,6 +1385,43 @@ input[type="range"]::-moz-range-thumb {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   overflow: hidden;
+  transition: width 0.18s ease;
+}
+/* 折叠态：只留一条窄条（竖排标题 + 底部展开按钮），主区自动占据空出的空间 */
+.tasks-pane.collapsed {
+  width: 40px;
+}
+.tasks-pane.collapsed .tasks-pane-head {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  flex: 1;
+  padding: 10px 0;
+  gap: 10px;
+  border-bottom: none;
+  flex-wrap: nowrap;
+}
+.tasks-pane.collapsed .tasks-pane-head h2,
+.tasks-pane.collapsed .tasks-pane-head > div {
+  display: none;
+}
+.tasks-pane.collapsed .tasks-pane-head .collapsed-title {
+  order: 2;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: var(--muted);
+  user-select: none;
+  white-space: nowrap;
+}
+.tasks-pane.collapsed .tasks-pane-head .icon-btn {
+  order: 1;
+}
+.tasks-pane.collapsed .tasks-scroll {
+  display: none;
 }
 .tasks-pane-head {
   display: flex;
@@ -1351,7 +1430,7 @@ input[type="range"]::-moz-range-thumb {
   gap: 8px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .tasks-pane-head h2 {
   margin: 0;
