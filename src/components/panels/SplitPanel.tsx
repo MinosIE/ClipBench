@@ -295,14 +295,20 @@ export default function SplitPanel() {
 
         <div class="field row">
           <label>静音输出</label>
-          <label class="check-row" style={{ "margin": "0" }}>
+          <label class="inline-check">
             <input
               type="checkbox"
               checked={mute()}
               onChange={(e) => setMute(e.currentTarget.checked)}
             />
-            <span class="check-label">去除音轨</span>
+            去除音轨
           </label>
+        </div>
+
+        <div class="actions">
+          <button class="btn" onClick={submit} disabled={busy()}>
+            {busy() ? "提交中…" : "开始拆分"}
+          </button>
         </div>
       </div>
 
@@ -319,11 +325,6 @@ export default function SplitPanel() {
         </div>
       </aside>
 
-      <div class="actions">
-        <button class="btn" onClick={submit} disabled={busy()}>
-          {busy() ? "提交中…" : "开始拆分"}
-        </button>
-      </div>
     </div>
   );
 }

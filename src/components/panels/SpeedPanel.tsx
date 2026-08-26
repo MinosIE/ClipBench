@@ -47,7 +47,7 @@ export default function SpeedPanel() {
       <p class="muted">调整播放速度（0.5x ~ 4x），或生成倒放视频。</p>
 
       <div class="form-card">
-        <div class="field col-span">
+        <div class="field row col-span">
           <label>速度倍率</label>
         <div class="seg">
           <For each={presets}>
@@ -74,18 +74,27 @@ export default function SpeedPanel() {
         </div>
       </div>
 
-      <label class="check-row">
-        <input
-          type="checkbox"
-          checked={reverse()}
-          onChange={(e) => setReverse(e.currentTarget.checked)}
-        />
-        倒放
-      </label>
+      <div class="field row">
+        <label>倒放</label>
+        <label class="inline-check">
+          <input
+            type="checkbox"
+            checked={reverse()}
+            onChange={(e) => setReverse(e.currentTarget.checked)}
+          />
+          生成倒放视频
+        </label>
+      </div>
 
       <p class="hint col-span">
         加速（&gt;1x）丢弃部分帧、文件变小；减速（&lt;1x）复制帧、体积增大。慢动作选 0.5x，长视频摘要选 2x~4x。
       </p>
+
+      <div class="actions">
+        <button class="btn" onClick={submit} disabled={busy()}>
+          {busy() ? "提交中…" : "开始处理"}
+        </button>
+      </div>
 
       </div>
 
@@ -101,12 +110,6 @@ export default function SpeedPanel() {
           建议：慢动作选 0.5x，长视频摘要选 2x~4x。
         </div>
       </aside>
-
-      <div class="actions">
-        <button class="btn" onClick={submit} disabled={busy()}>
-          {busy() ? "提交中…" : "开始处理"}
-        </button>
-      </div>
     </div>
   );
 }

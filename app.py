@@ -556,6 +556,9 @@ def _run_ffmpeg_locked(args, task_id, workdir, seg_index=0, seg_total=1):
         # 拆分任务：完成后探测输出文件，记录基本信息
         elif task.get("kind") == "split":
             _record_split_result(task, workdir)
+        # 合并任务：完成后探测输出文件，记录基本信息（大小/编码/分辨率/时长）
+        elif task.get("kind") == "merge" and task.get("output_name"):
+            _record_split_result(task, workdir)
     else:
         task["status"] = "failed"
         task["error"] = "\n".join(out_lines[-30:])[:2000]
@@ -1113,16 +1116,26 @@ def api_screenshot():
         return jsonify({"error": "源文件不存在"}), 404
     mode = data.get("mode", "single")  # single | every
     meta = get_media_meta(str(src))
+    fmt = (data.get("format") or "jpg").lower()
+    if fmt not in ("jpg", "jpeg", "png", "webp", "avif"):
+        return jsonify({"error": f"不支持的输出格式：{fmt}"}), 400
+    ext = "jpg" if fmt == "jpeg" else fmt
+    # 不同图片格式选用对应编码器，保证 ffmpeg 能正常写出
+    enc_args = []
+    if fmt == "webp":
+        enc_args = ["-c:v", "libwebp"]
+    elif fmt == "avif":
+        enc_args = ["-c:v", "libaom-av1", "-still-picture", "1"]
     if mode == "single":
         time_pos = data.get("time", "00:00:01")
-        fmt = data.get("format", "jpg")
-        out = OUTPUT_DIR / f"shot_{src.stem}_{int(time.time())}.{fmt}"
+        out = OUTPUT_DIR / f"shot_{src.stem}_{int(time.time())}.{ext}"
         args = ["-i", str(src), "-ss", str(time_pos), "-vframes", "1"]
         vf = data.get("vf")
         if vf:
             args += ["-vf", vf]
+        args += enc_args
         args += [str(out)]
-        task_id = new_task(f"截图 @ {time_pos}", duration=meta.get("duration", 0))
+        task_id = new_task(f"截图 @ {time_pos} (.{ext})", duration=meta.get("duration", 0))
         TASKS[task_id]["output_name"] = out.name
         save_tasks()
         start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
@@ -1131,12 +1144,12 @@ def api_screenshot():
         interval = float(data.get("interval", 1))
         if interval <= 0:
             return jsonify({"error": "间隔需大于0"}), 400
-        fmt = data.get("format", "jpg")
         base = OUTPUT_DIR / f"shots_{src.stem}_{int(time.time())}"
         base.mkdir(exist_ok=True)
         args = ["-i", str(src), "-vf",
-                f"fps=1/{interval}", str(base / f"shot_%05d.{fmt}")]
-        task_id = new_task(f"每 {interval}s 截图", duration=meta.get("duration", 0))
+                f"fps=1/{interval}", str(base / f"shot_%05d.{ext}")]
+        args += enc_args
+        task_id = new_task(f"每 {interval}s 截图 (.{ext})", duration=meta.get("duration", 0))
         TASKS[task_id]["output_dir"] = str(base)
         save_tasks()
         start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
@@ -1448,10 +1461,51 @@ def api_crop():
 
 
 # ---------------- 合并拼接 ----------------
+def _check_merge_compatible(paths: list) -> str | None:
+    """copy 模式拼接前校验所有源参数一致。返回错误文案（None 表示可拼接）。
+
+    需要一致的关键字段：视频编码、分辨率、帧率、像素格式、音频编码。
+    其中像素格式 ffprobe 默认不暴露，且对拼接影响较小，这里以编码/分辨率/
+    帧率/音频编码为主。只要有一项不一致就直接报错，避免任务跑起来才失败。
+    """
+    metas = []
+    for p in paths:
+        try:
+            m = get_media_meta(str(p))
+        except Exception as e:  # ffprobe 异常（文件损坏等）
+            return f"无法读取文件信息: {p.name}（{e}）"
+        metas.append((p.name, m))
+
+    # 逐个字段比对，收集首个不一致项用于提示
+    ref_name, ref = metas[0]
+    checks = [
+        ("视频编码", "video_codec"),
+        ("分辨率", lambda m: f"{m.get('width')}x{m.get('height')}"),
+        ("帧率", "fps"),
+        ("音频编码", "audio_codec"),
+    ]
+    for label, key in checks:
+        ref_val = key(ref) if callable(key) else ref.get(key)
+        for name, m in metas[1:]:
+            cur_val = key(m) if callable(key) else m.get(key)
+            if ref_val != cur_val:
+                return (
+                    f"「保留原编码」要求所有视频参数一致，但 {name} 与 {ref_name} 的"
+                    f"{label}不同（{ref_val} ≠ {cur_val}）。请改用「重编码」后重试。"
+                )
+    return None
+
+
 @app.route("/api/merge", methods=["POST"])
 def api_merge():
     data = request.json
     faststart = bool(data.get("faststart", False))
+    # 编码方式：
+    #  h264  / hevc -> 统一重编码为对应编码器 + aac（不同源也能正确拼接，最稳）
+    #  copy  -> 直接流拷贝（极速、零画质损失，但要求所有源参数完全一致，否则拼接异常）
+    encode = (data.get("encode") or "h264").lower()
+    if encode not in ("h264", "hevc", "copy"):
+        encode = "h264"
     file_ids = [secure_filename(f) for f in data.get("file_ids", [])]
     if len(file_ids) < 2:
         return jsonify({"error": "请至少选择 2 个文件进行合并"}), 400
@@ -1459,6 +1513,12 @@ def api_merge():
     for p in paths:
         if not p.exists():
             return jsonify({"error": f"文件不存在: {p.name}"}), 404
+    # 保留原编码（copy）模式要求所有源参数完全一致，否则 ffmpeg concat 会直接失败或
+    # 在拼接处黑屏/音画错位。这里先 ffprobe 校验，不一致就给出明确提示，不打无准备之仗。
+    if encode == "copy":
+        _err = _check_merge_compatible(paths)
+        if _err:
+            return jsonify({"error": _err}), 400
     # 生成 concat 列表文件
     list_file = OUTPUT_DIR / f"merge_list_{int(time.time())}.txt"
     list_file.write_text(
@@ -1466,12 +1526,22 @@ def api_merge():
     )
     suffix = Path(file_ids[0]).suffix or ".mp4"
     out = OUTPUT_DIR / f"merge_{int(time.time())}{suffix}"
-    # 统一编码避免拼接黑屏/音画不同步: 重编码为 h264+aac
-    args = ["-f", "concat", "-safe", "0", "-i", str(list_file),
-            "-c:v", "libx264", "-c:a", "aac", "-b:a", "128k"]
+    if encode == "copy":
+        args = ["-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy"]
+    else:
+        # 统一编码避免拼接黑屏/音画不同步
+        if encode == "hevc":
+            vcodec = ["-c:v", "libx265", "-crf", "20", "-tag:v", "hvc1"]
+        else:  # h264
+            vcodec = ["-c:v", "libx264", "-crf", "18",
+                      "-x264-params", "keyint=2:min-keyint=2"]
+        args = ["-f", "concat", "-safe", "0", "-i", str(list_file),
+                *vcodec, "-c:a", "aac", "-b:a", "128k"]
     args = _finalize(args, out, faststart)
     duration = sum(get_media_meta(str(p)).get("duration", 0) for p in paths)
-    task_id = new_task(f"合并 {len(file_ids)} 个文件", duration=duration)
+    task_id = new_task(f"合并 {len(file_ids)} 个文件",
+                       duration=duration,
+                       extra={"kind": "merge", "encode": encode, "count": len(file_ids), "files": file_ids})
     TASKS[task_id]["output_name"] = out.name
     save_tasks()
     start_task(task_id, args, duration, OUTPUT_DIR)

@@ -447,6 +447,38 @@ button {
   background: rgba(255, 80, 80, 0.08);
 }
 
+/* 合并面板：顺序列表 + 每个文件的编码/分辨率/时长信息 */
+.merge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.merge-list .row {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.merge-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.merge-meta {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
 /* ---------- 主内容区（左右两栏） ---------- */
 .main {
   flex: 1;
@@ -923,6 +955,23 @@ input[type="range"]::-moz-range-thumb {
 .row .check-row {
   margin-bottom: 0;
 }
+/* 字段行内的紧凑 checkbox+文字组合：用作「label + 文字说明型开关」，
+   普通内联布局、无开关轨道占位，避免在字段行内被 ::before/::after 遮挡 */
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  color: var(--text);
+}
+.inline-check input[type="checkbox"] {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
 /* 裁剪选区上的删除按钮 */
 .crop-del {
   position: absolute;
@@ -951,7 +1000,11 @@ input[type="range"]::-moz-range-thumb {
 .actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
   margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
 }
 .actions .btn {
   min-width: 160px;

@@ -96,6 +96,12 @@ export default function ConvertPanel() {
         </div>
       </Show>
 
+      <div class="actions">
+        <button class="btn" onClick={submit} disabled={busy()}>
+          {busy() ? "提交中…" : "开始转换"}
+        </button>
+      </div>
+
       </div>
 
       <aside class="panel-aside">
@@ -111,12 +117,6 @@ export default function ConvertPanel() {
           选「直接复制」可秒级封装，但不改变编码与体积。
         </div>
       </aside>
-
-      <div class="actions">
-        <button class="btn" onClick={submit} disabled={busy()}>
-          {busy() ? "提交中…" : "开始转换"}
-        </button>
-      </div>
     </div>
   );
 }

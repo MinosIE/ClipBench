@@ -85,7 +85,7 @@ export default function WatermarkPanel() {
       <p class="muted">为视频添加文字或图片水印，支持 9 宫格位置与透明度。</p>
 
       <div class="form-card">
-        <div class="field col-span">
+        <div class="field row col-span">
           <label>水印类型</label>
         <div class="seg">
           <button
@@ -104,7 +104,7 @@ export default function WatermarkPanel() {
       </div>
 
       <Show when={type() === "text"}>
-        <div class="field">
+        <div class="field row">
           <label>水印文字</label>
           <input
             type="text"
@@ -113,7 +113,7 @@ export default function WatermarkPanel() {
           />
         </div>
         <div class="row">
-          <div class="field" style={{ "margin-bottom": "0" }}>
+          <div class="field row" style={{ "margin-bottom": "0" }}>
             <label>字号(px)</label>
             <input
               type="number"
@@ -122,7 +122,7 @@ export default function WatermarkPanel() {
               style={{ width: "90px" }}
             />
           </div>
-          <div class="field" style={{ "margin-bottom": "0" }}>
+          <div class="field row" style={{ "margin-bottom": "0" }}>
             <label>颜色</label>
             <input
               type="color"
@@ -135,14 +135,14 @@ export default function WatermarkPanel() {
       </Show>
 
       <Show when={type() === "image"}>
-        <div class="field">
+        <div class="field row">
           <label>水印图片</label>
           <input type="file" accept="image/*" onChange={onWmUpload} />
           <Show when={wmName()}>
             <span class="hint">已上传：{wmName()}</span>
           </Show>
         </div>
-        <div class="field">
+        <div class="field row">
           <label>相对宽度(%)</label>
           <div class="range-row">
             <input
@@ -157,7 +157,7 @@ export default function WatermarkPanel() {
         </div>
       </Show>
 
-      <div class="field">
+      <div class="field row">
         <label>位置</label>
         <div class="seg">
           <For each={POSITIONS}>
@@ -174,7 +174,7 @@ export default function WatermarkPanel() {
       </div>
 
       <div class="row">
-        <div class="field" style={{ "margin-bottom": "0" }}>
+        <div class="field row" style={{ "margin-bottom": "0" }}>
           <label>边距(px)</label>
           <input
             type="number"
@@ -183,7 +183,7 @@ export default function WatermarkPanel() {
             style={{ width: "90px" }}
           />
         </div>
-        <div class="field" style={{ "margin-bottom": "0" }}>
+        <div class="field row" style={{ "margin-bottom": "0" }}>
           <label>透明度</label>
           <div class="range-row">
             <input
@@ -197,6 +197,12 @@ export default function WatermarkPanel() {
             <span class="range-val">{alpha().toFixed(2)}</span>
           </div>
         </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn" onClick={submit} disabled={busy()}>
+          {busy() ? "提交中…" : "开始添加水印"}
+        </button>
       </div>
 
       </div>
@@ -213,12 +219,6 @@ export default function WatermarkPanel() {
           提示：边距越大，水印离画面边缘越远，更显精致。
         </div>
       </aside>
-
-      <div class="actions">
-        <button class="btn" onClick={submit} disabled={busy()}>
-          {busy() ? "提交中…" : "开始添加水印"}
-        </button>
-      </div>
     </div>
   );
 }

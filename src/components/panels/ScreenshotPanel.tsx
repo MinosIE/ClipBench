@@ -44,7 +44,7 @@ export default function ScreenshotPanel() {
       <p class="muted">截取单张画面，或按固定间隔批量截取。</p>
 
       <div class="form-card">
-        <div class="field col-span">
+        <div class="field row col-span">
           <label>模式</label>
           <div class="seg">
             <button
@@ -63,7 +63,7 @@ export default function ScreenshotPanel() {
         </div>
 
         <Show when={mode() === "single"}>
-          <div class="field">
+          <div class="field row">
             <label>时间点（HH:MM:SS）</label>
             <input
               type="text"
@@ -75,7 +75,7 @@ export default function ScreenshotPanel() {
         </Show>
 
         <Show when={mode() === "every"}>
-          <div class="field">
+          <div class="field row">
             <label>间隔（秒）</label>
             <input
               type="number"
@@ -87,7 +87,7 @@ export default function ScreenshotPanel() {
           </div>
         </Show>
 
-        <div class="field">
+        <div class="field row">
           <label>输出格式</label>
           <div class="seg">
             <button
@@ -102,7 +102,25 @@ export default function ScreenshotPanel() {
             >
               PNG
             </button>
+            <button
+              class={format() === "webp" ? "active" : ""}
+              onClick={() => setFormat("webp")}
+            >
+              WebP
+            </button>
+            <button
+              class={format() === "avif" ? "active" : ""}
+              onClick={() => setFormat("avif")}
+            >
+              AVIF
+            </button>
           </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn" onClick={submit} disabled={busy()}>
+            {busy() ? "提交中…" : "开始截图"}
+          </button>
         </div>
 
       </div>
@@ -119,12 +137,6 @@ export default function ScreenshotPanel() {
           提示：封面图建议用「单张」+ PNG 保清晰。
         </div>
       </aside>
-
-      <div class="actions">
-        <button class="btn" onClick={submit} disabled={busy()}>
-          {busy() ? "提交中…" : "开始截图"}
-        </button>
-      </div>
     </div>
   );
 }

@@ -233,7 +233,11 @@ export default function Tasks() {
                       </Show>
                       <Show when={t.encode}>
                         <span class="cc-tag">
-                          {t.encode === "copy" ? "保留原编码" : "重编码 H.264"}
+                          {t.encode === "copy"
+                            ? "保留原编码"
+                            : t.encode === "hevc"
+                              ? "重编码 HEVC"
+                              : "重编码 H.264"}
                         </span>
                       </Show>
                       <Show when={t.out_codec}>

@@ -56,7 +56,7 @@ export default function RotatePanel() {
       <p class="muted">旋转视频角度，或水平/垂直翻转画面。</p>
 
       <div class="form-card">
-        <div class="field col-span">
+        <div class="field row col-span">
           <label>旋转角度</label>
         <div class="seg">
           <For each={ROTS}>
@@ -72,28 +72,37 @@ export default function RotatePanel() {
         </div>
       </div>
 
-      <div class="row">
-        <label class="check-row">
-          <input
-            type="checkbox"
-            checked={flipH()}
-            onChange={(e) => setFlipH(e.currentTarget.checked)}
-          />
-          水平翻转
-        </label>
-        <label class="check-row">
-          <input
-            type="checkbox"
-            checked={flipV()}
-            onChange={(e) => setFlipV(e.currentTarget.checked)}
-          />
-          垂直翻转
-        </label>
+      <div class="field row">
+        <label>翻转</label>
+        <div class="row" style={{ "align-items": "center", gap: "16px" }}>
+          <label class="inline-check">
+            <input
+              type="checkbox"
+              checked={flipH()}
+              onChange={(e) => setFlipH(e.currentTarget.checked)}
+            />
+            水平翻转
+          </label>
+          <label class="inline-check">
+            <input
+              type="checkbox"
+              checked={flipV()}
+              onChange={(e) => setFlipV(e.currentTarget.checked)}
+            />
+            垂直翻转
+          </label>
+        </div>
       </div>
 
       <p class="hint col-span">
         旋转会重新编码画面（耗时略长）；仅翻转可通过元数据实现，速度极快。竖屏素材导出到横屏平台时，顺时针 90° 最自然。
       </p>
+
+      <div class="actions">
+        <button class="btn" onClick={submit} disabled={busy()}>
+          {busy() ? "提交中…" : "开始旋转"}
+        </button>
+      </div>
 
       </div>
 
@@ -108,12 +117,6 @@ export default function RotatePanel() {
           提示：竖屏素材导出到横屏平台时，顺时针 90° 通常最自然。
         </div>
       </aside>
-
-      <div class="actions">
-        <button class="btn" onClick={submit} disabled={busy()}>
-          {busy() ? "提交中…" : "开始旋转"}
-        </button>
-      </div>
     </div>
   );
 }

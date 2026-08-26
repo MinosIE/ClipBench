@@ -18,9 +18,40 @@ async function jsonFetch(url: string, init?: RequestInit) {
   const res = await fetch(url, { ...init, headers, body });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`请求失败 ${res.status}: ${text.slice(0, 200)}`);
+    // 尝试解析后端 JSON 错误体（如 {error: "..."}），解析失败则降级显示原文。
+    // 否则会把整个 JSON 字符串拼进 Error，导致 toast 里出现 \u 转义乱码。
+    let msg = text.slice(0, 200);
+    try {
+      const j = JSON.parse(text);
+      if (j && typeof j.error === "string") msg = j.error;
+    } catch {
+      /* 文本不是 JSON，保持原文 */
+    }
+    throw new Error(msg);
   }
   return res.json();
+}
+
+/** 复制模式（保留原编码）下，选中文件参数是否一致。返回 null 表示 OK，否则返回中文错误。 */
+export function checkMergeCompatible(files: StoredFile[]): string | null {
+  if (files.length < 2) return null;
+  const ref = files[0];
+  for (const f of files.slice(1)) {
+    if ((ref.video_codec ?? "") !== (f.video_codec ?? "")) {
+      return `「保留原编码」要求所有视频参数一致，但 ${f.name} 与 ${ref.name} 的视频编码不同（${ref.video_codec ?? "未知"} ≠ ${f.video_codec ?? "未知"}）。请改用「H.264」或「HEVC」后重试。`;
+    }
+    if (ref.width && f.width && ref.height && f.height &&
+        (ref.width !== f.width || ref.height !== f.height)) {
+      return `「保留原编码」要求所有视频参数一致，但 ${f.name} 与 ${ref.name} 的分辨率不同（${ref.width}x${ref.height} ≠ ${f.width}x${f.height}）。请改用「H.264」或「HEVC」后重试。`;
+    }
+    if (ref.fps && f.fps && Math.abs(ref.fps - f.fps) > 0.5) {
+      return `「保留原编码」要求所有视频参数一致，但 ${f.name} 与 ${ref.name} 的帧率不同（${ref.fps} ≠ ${f.fps}）。请改用「H.264」或「HEVC」后重试。`;
+    }
+    if ((ref.audio_codec ?? "") !== (f.audio_codec ?? "")) {
+      return `「保留原编码」要求所有视频参数一致，但 ${f.name} 与 ${ref.name} 的音频编码不同（${ref.audio_codec ?? "未知"} ≠ ${f.audio_codec ?? "未知"}）。请改用「H.264」或「HEVC」后重试。`;
+    }
+  }
+  return null;
 }
 
 export interface StoredFile {
@@ -340,13 +371,13 @@ export async function cropVideo(params: {
 }
 
 // ---------- 合并 ----------
-export async function mergeVideos(file_ids: string[], faststart?: boolean): Promise<{
+export async function mergeVideos(file_ids: string[], faststart?: boolean, encode?: "h264" | "hevc" | "copy"): Promise<{
   task_id: string;
 }> {
   return jsonFetch("/api/merge", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file_ids, faststart: !!faststart }),
+    body: JSON.stringify({ file_ids, faststart: !!faststart, encode: encode ?? "reencode" }),
   });
 }
 

@@ -311,6 +311,44 @@ def test_merge_requires_existing_files(client, sample_video):
     assert r.status_code == 404
 
 
+def test_merge_copy_requires_consistent_codec(client, sample_video):
+    """「保留原编码」模式下，源参数不一致应被前端拦截，返回 400 + 明确提示。"""
+    try:
+        ff = app_module.get_ffmpeg()
+    except Exception as exc:
+        pytest.skip(f"未找到可用的 ffmpeg：{exc}")
+    fid1 = _upload(client, sample_video).get_json()["file_id"]
+    # 生成一段不同分辨率(320x180)的对比视频
+    p2 = sample_video.parent / "other.mp4"
+    r = subprocess.run(
+        [ff, "-y", "-hide_banner", "-loglevel", "error",
+         "-f", "lavfi", "-i", "testsrc=duration=1:size=320x180:rate=10",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+         "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-shortest", str(p2)],
+        capture_output=True, timeout=120,
+    )
+    if r.returncode != 0 or not p2.exists():
+        pytest.skip("无法生成对比视频，跳过一致性校验测试")
+    fid2 = _upload(client, p2).get_json()["file_id"]
+    resp = client.post(
+        "/api/merge", json={"file_ids": [fid1, fid2], "encode": "copy"}
+    )
+    assert resp.status_code == 400
+    assert "保留原编码" in resp.get_json()["error"]
+
+
+def test_merge_copy_same_files_ok(client, sample_video):
+    """同源两份用 copy 模式合并应成功入队（不触发一致性校验失败）。"""
+    fid = _upload(client, sample_video).get_json()["file_id"]
+    resp = client.post(
+        "/api/merge", json={"file_ids": [fid, fid], "encode": "copy"}
+    )
+    assert resp.status_code == 200
+    assert "task_id" in resp.get_json()
+
+
+
 def test_rotate_requires_choice(client, sample_video):
     fid = _upload(client, sample_video).get_json()["file_id"]
     # 未选旋转角度也未选翻转 -> 400
