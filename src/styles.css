@@ -363,6 +363,14 @@ button {
   background: #000;
   flex-shrink: 0;
 }
+.file-thumb-audio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 20px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
 .file-info {
   min-width: 0;
   flex: 1;

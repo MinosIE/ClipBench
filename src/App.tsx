@@ -19,6 +19,8 @@ import {
   toasts,
   faststartEnabled,
   toggleFaststart,
+  showOutputs,
+  toggleShowOutputs,
 } from "./store";
 import { uploadFile, thumbUrl } from "./api";
 import Sidebar, { refreshFiles } from "./components/Sidebar";
@@ -107,6 +109,23 @@ export default function App() {
           </div>
         </div>
         <div class="topbar-actions">
+          <label class="fs-switch">
+            <input
+              type="checkbox"
+              checked={showOutputs()}
+              onChange={() => {
+                toggleShowOutputs();
+                refreshFiles();
+              }}
+            />
+            <span class="fs-text">显示产物</span>
+            <span
+              class="fs-help"
+              tabindex="0"
+              role="tooltip"
+              data-tip="开启后，处理完成的视频产物会回流到左侧媒体列表，可直接继续二次处理；关闭后只显示手动上传的文件。"
+            >?</span>
+          </label>
           <label class="fs-switch">
             <input
               type="checkbox"

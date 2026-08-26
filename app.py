@@ -710,13 +710,27 @@ def _is_ignored_file(name: str) -> bool:
     return False
 
 
+def _find_media(file_id: str):
+    """在 uploads 与 outputs 中查找媒体文件，支持产物二次处理/缩略图/取帧"""
+    name = secure_filename(file_id)
+    for root in (UPLOAD_DIR, OUTPUT_DIR):
+        p = root / name
+        if p.is_file():
+            return p
+    return None
+
+
 @app.route("/api/files")
 def api_files():
+    # outputs=0 时只返回手动上传的文件，产物不回流到左侧列表（顶栏开关控制）
+    include_outputs = request.args.get("outputs", "1") != "0"
     files = []
     seen = set()
     entries = []
-    # 上传目录为主，输出目录产物也一并列出（location=outputs），供左侧列表回流
+    # 上传目录为主，输出目录产物按开关列出（location=outputs），供左侧列表回流
     for root, loc in ((UPLOAD_DIR, "uploads"), (OUTPUT_DIR, "outputs")):
+        if loc == "outputs" and not include_outputs:
+            continue
         for p in root.iterdir():
             if not p.is_file() or _is_ignored_file(p.name):
                 continue
@@ -736,6 +750,8 @@ def api_files():
             meta = get_media_meta(str(p))
         except Exception:
             meta = {}
+        if not meta.get("has_video"):
+            continue  # 只展示视频类媒体，音频（含音频提取产物）不进列表
         files.append({
             "file_id": p.name,
             "filename": p.name,
@@ -749,8 +765,8 @@ def api_files():
 
 @app.route("/api/file/<file_id>")
 def api_file_info(file_id):
-    p = UPLOAD_DIR / secure_filename(file_id)
-    if not p.exists():
+    p = _find_media(file_id)
+    if p is None:
         abort(404)
     meta = get_media_meta(str(p))
     return jsonify({"file_id": p.name, "filename": p.name, "meta": meta})
@@ -758,9 +774,9 @@ def api_file_info(file_id):
 
 @app.route("/api/thumbnail/<file_id>")
 def api_thumbnail(file_id):
-    """生成并返回视频首帧缩略图"""
-    p = UPLOAD_DIR / secure_filename(file_id)
-    if not p.exists():
+    """生成并返回视频首帧缩略图（uploads 与 outputs 均支持）"""
+    p = _find_media(file_id)
+    if p is None:
         abort(404)
     thumb = OUTPUT_DIR / f"thumb_{p.stem}.jpg"
     if not thumb.exists():
@@ -781,8 +797,8 @@ def api_thumbnail(file_id):
 @app.route("/api/frame/<file_id>")
 def api_frame(file_id):
     """返回视频在指定时间点的原始分辨率帧（JPEG），用于去字幕选区预览"""
-    p = UPLOAD_DIR / secure_filename(file_id)
-    if not p.exists():
+    p = _find_media(file_id)
+    if p is None:
         abort(404)
     try:
         t = float(request.args.get("t", 1))

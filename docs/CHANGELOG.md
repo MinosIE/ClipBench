@@ -8,6 +8,21 @@
 
 ## 待提交改动
 
+### 2026-08-26 — 媒体列表收敛：音频不回流 + 产物显示开关
+- 涉及文件：`app.py`、`src/api.ts`、`src/store.ts`、`src/App.tsx`、`src/components/Sidebar.tsx`、`vite.config.js`、`docs/CHANGELOG.md`
+
+**音频不再进入媒体文件列表**
+- 后端 `/api/files`：`get_media_meta` 后过滤 `has_video` 为假的文件 → 音频（含音频提取产物 mp3/m4a/wav/flac）不再显示在左侧；同时修复产物缩略图/取帧/元信息 404（`_find_media` 同时查 uploads 与 outputs）。
+
+**产物回流开关（顶栏「显示产物」，置于快速启动左侧）**
+- `store.ts` 新增 `showOutputs` 信号（localStorage 键 `cb_show_outputs`，默认开启）+ `toggleShowOutputs()`。
+- 后端 `/api/files?outputs=0`：关闭时仅返回手动上传文件；前端 `listFiles({ includeOutputs })` 透传，切换开关立即刷新列表。
+- 产物开关独立持久化，不影响「快速启动」开关。
+
+**前端缩略图 404 根治（上一轮遗留）**
+- `Sidebar` 视频缩略图 `onerror` 防死循环（二次失败隐藏）+ 按 `location` 兜底 `/outputs/` 或 `/uploads/`；音频文件渲染 ♪ 占位（防御性保留，列表已无音频）。
+- `vite.config.js` dev 代理 5000→8080（macOS 隔空播放接收器占用 5000 会返回 403），并补 `/outputs` 代理。
+
 ### 2026-08-26 — P0 任务闭环：失败日志查看 + 取消接口修复
 - 涉及文件：`app.py`、`src/api.ts`、`src/components/Tasks.tsx`、`src/styles.css`、`docs/todo.md`
 

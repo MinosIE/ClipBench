@@ -135,6 +135,17 @@ export function toggleFaststart() {
   localStorage.setItem("cb_faststart", next ? "1" : "0");
 }
 
+// 产物回流开关：是否在左侧媒体列表显示处理完成的视频产物。
+// 默认开启（产物可二次处理）；关闭后仅显示手动上传的文件。
+export const [showOutputs, setShowOutputs] = createSignal<boolean>(
+  localStorage.getItem("cb_show_outputs") !== "0"
+);
+export function toggleShowOutputs() {
+  const next = !showOutputs();
+  setShowOutputs(next);
+  localStorage.setItem("cb_show_outputs", next ? "1" : "0");
+}
+
 export interface ModalState {
   title: string;
   message: string;

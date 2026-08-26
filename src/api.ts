@@ -149,8 +149,11 @@ function mapFile(raw: any): StoredFile {
   };
 }
 
-export async function listFiles(): Promise<StoredFile[]> {
-  const data = await jsonFetch("/api/files");
+export async function listFiles(opts: {
+  includeOutputs?: boolean;
+} = {}): Promise<StoredFile[]> {
+  const q = opts.includeOutputs === false ? "?outputs=0" : "";
+  const data = await jsonFetch(`/api/files${q}`);
   return (data.files ?? []).map(mapFile);
 }
 

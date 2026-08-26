@@ -13,6 +13,7 @@ import {
   confirmModal,
   pushToast,
   setActiveTab,
+  showOutputs,
 } from "../store";
 import {
   uploadFile,
@@ -20,12 +21,13 @@ import {
   deleteFiles,
   listFiles,
   uploadUrl,
+  outputUrl,
   thumbUrl,
 } from "../api";
 
 export async function refreshFiles() {
   try {
-    const data = await listFiles();
+    const data = await listFiles({ includeOutputs: showOutputs() });
     setFiles(data);
     if (selectedId() && !data.find((f) => f.name === selectedId())) {
       setSelectedId(null);
@@ -196,15 +198,33 @@ export default function Sidebar() {
                   onClick={(e) => e.stopPropagation()}
                   onChange={() => toggleSelect(f.name)}
                 />
-                <img
-                  class="file-thumb"
-                  src={thumbUrl(f.name)}
-                  onerror={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = uploadUrl(
-                      f.name
-                    );
-                  }}
-                />
+                {/* 音频无视频帧，直接渲染占位图标，避免缩略图接口 404 刷屏 */}
+                <Show
+                  when={f.is_video}
+                  fallback={
+                    <div class="file-thumb file-thumb-audio" aria-hidden="true">
+                      ♪
+                    </div>
+                  }
+                >
+                  <img
+                    class="file-thumb"
+                    src={thumbUrl(f.name)}
+                    onerror={(e) => {
+                      const img = e.currentTarget as HTMLImageElement;
+                      // 首次失败回退到原始文件地址；再失败则隐藏，防止 404 反复刷屏
+                      if (img.dataset.fallback) {
+                        img.style.display = "none";
+                        return;
+                      }
+                      img.dataset.fallback = "1";
+                      img.src =
+                        f.location === "outputs"
+                          ? outputUrl(f.name)
+                          : uploadUrl(f.name);
+                    }}
+                  />
+                </Show>
                 <div class="file-info">
                   <div class="file-name" title={f.name}>
                     {f.name}
