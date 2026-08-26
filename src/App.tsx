@@ -34,6 +34,7 @@ import {
   RotatePanel,
   WatermarkPanel,
   SpeedPanel,
+  AudioExtractPanel,
 } from "./components/panels";
 import { startSSE } from "./sse";
 
@@ -253,6 +254,9 @@ export default function App() {
                     </Show>
                     <Show when={activeTab() === "speed"}>
                       <SpeedPanel />
+                    </Show>
+                    <Show when={activeTab() === "audio"}>
+                      <AudioExtractPanel />
                     </Show>
                   </div>
                 </div>

@@ -533,6 +533,9 @@ def _run_ffmpeg_locked(args, task_id, workdir, seg_index=0, seg_total=1):
             k, _, v = line.partition("=")
             progress[k.strip()] = v.strip()
         out_lines.append(line)
+        # 只保留尾部日志，避免长任务无限累积内存；查看日志时取最后几行即可
+        if len(out_lines) > 600:
+            out_lines.pop(0)
         if duration > 0:
             try:
                 ms = int(progress.get("out_time_ms", 0) or 0)
@@ -562,6 +565,8 @@ def _run_ffmpeg_locked(args, task_id, workdir, seg_index=0, seg_total=1):
     else:
         task["status"] = "failed"
         task["error"] = "\n".join(out_lines[-30:])[:2000]
+    # 完整 ffmpeg 输出（stderr 并入 stdout）存入任务记录，供前端「查看日志」弹窗
+    task["log"] = "\n".join(out_lines)
     task["elapsed"] = int(time.time() - (task.get("created_at") or time.time()))
     save_tasks()
 
@@ -708,19 +713,37 @@ def _is_ignored_file(name: str) -> bool:
 @app.route("/api/files")
 def api_files():
     files = []
-    for p in sorted(UPLOAD_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-        if p.is_file() and not _is_ignored_file(p.name):
-            try:
-                meta = get_media_meta(str(p))
-            except Exception:
-                meta = {}
-            files.append({
-                "file_id": p.name,
-                "filename": p.name,
-                "size": p.stat().st_size,
-                "size_human": human_size(p.stat().st_size),
-                "meta": meta,
-            })
+    seen = set()
+    entries = []
+    # 上传目录为主，输出目录产物也一并列出（location=outputs），供左侧列表回流
+    for root, loc in ((UPLOAD_DIR, "uploads"), (OUTPUT_DIR, "outputs")):
+        for p in root.iterdir():
+            if not p.is_file() or _is_ignored_file(p.name):
+                continue
+            if loc == "outputs" and (
+                p.name.startswith("thumb_")
+                or p.name.endswith(".zip")
+                or p.name.startswith("merge_list_")  # 合并清单等中间文件
+            ):
+                continue  # 缩略图、打包产物与中间文件不展示
+            entries.append((p, loc))
+    entries.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
+    for p, loc in entries:
+        if p.name in seen:
+            continue  # 同名时优先 mtime 新的（通常是 uploads 覆盖 outputs）
+        seen.add(p.name)
+        try:
+            meta = get_media_meta(str(p))
+        except Exception:
+            meta = {}
+        files.append({
+            "file_id": p.name,
+            "filename": p.name,
+            "location": loc,
+            "size": p.stat().st_size,
+            "size_human": human_size(p.stat().st_size),
+            "meta": meta,
+        })
     return jsonify({"files": files})
 
 
@@ -1722,6 +1745,50 @@ def api_speed():
     return jsonify({"task_id": task_id})
 
 
+# ---------------- 音频提取 ----------------
+@app.route("/api/extract_audio", methods=["POST"])
+def api_extract_audio():
+    """从视频中提取音轨（或直接转码纯音频），输出 mp3/wav/flac/m4a。"""
+    data = request.json or {}
+    file_id = secure_filename(data.get("file_id") or "")
+    if not file_id:
+        return jsonify({"error": "缺少 file_id"}), 400
+    # 源文件可来自上传目录或输出目录（产物可二次处理）
+    src = None
+    for root in (UPLOAD_DIR, OUTPUT_DIR):
+        p = root / file_id
+        if p.exists() and p.parent == root:
+            src = p
+            break
+    if src is None:
+        return jsonify({"error": "源文件不存在"}), 404
+    meta = get_media_meta(str(src))
+    if not meta.get("has_audio"):
+        return jsonify({"error": "源文件没有音频流"}), 400
+    fmt = data.get("format", "mp3")
+    if fmt not in ("mp3", "wav", "flac", "m4a"):
+        fmt = "mp3"
+    out = OUTPUT_DIR / f"audio_{src.stem}_{int(time.time())}.{fmt}"
+    if fmt == "mp3":
+        codec = ["-c:a", "libmp3lame", "-b:a", data.get("bitrate") or "192k"]
+    elif fmt == "m4a":
+        codec = ["-c:a", "aac", "-b:a", data.get("bitrate") or "192k"]
+    elif fmt == "wav":
+        codec = ["-c:a", "pcm_s16le"]
+    else:  # flac
+        codec = ["-c:a", "flac"]
+    args = ["-i", str(src), "-vn", "-map", "0:a:0", *codec]
+    args = _finalize(args, out, False)
+    label = f"音频 {fmt.upper()}"
+    if fmt in ("mp3", "m4a") and data.get("bitrate"):
+        label += f" {data['bitrate']}"
+    task_id = new_task(label, duration=meta.get("duration", 0))
+    TASKS[task_id]["output_name"] = out.name
+    save_tasks()
+    start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
+    return jsonify({"task_id": task_id})
+
+
 # ---------------- 去除字幕/硬字幕 ----------------
 @app.route("/api/desubtitle", methods=["POST"])
 def api_desubtitle():
@@ -1932,9 +1999,12 @@ def api_download_dir(task_id):
 def api_delete_upload(file_id):
     # file_id 来自可信的 api/files 列表，直接用 base 名拼接并防目录穿越
     name = os.path.basename(file_id)
-    p = UPLOAD_DIR / name
-    if p.exists() and p.parent == UPLOAD_DIR:
-        p.unlink()
+    # 优先上传目录，其次输出目录（左侧列表已回流产物文件）
+    for root in (UPLOAD_DIR, OUTPUT_DIR):
+        p = root / name
+        if p.exists() and p.parent == root:
+            p.unlink()
+            break
     return jsonify({"ok": True})
 
 
@@ -1948,13 +2018,15 @@ def api_delete_uploads():
     removed = []
     for fid in ids:
         name = os.path.basename(fid)
-        p = UPLOAD_DIR / name
-        if p.exists() and p.is_file() and p.parent == UPLOAD_DIR:
-            try:
-                p.unlink()
-                removed.append(fid)
-            except OSError:
-                pass
+        for root in (UPLOAD_DIR, OUTPUT_DIR):
+            p = root / name
+            if p.exists() and p.is_file() and p.parent == root:
+                try:
+                    p.unlink()
+                    removed.append(fid)
+                except OSError:
+                    pass
+                break
     # 若当前选中的被删文件正好在删除列表，则清空当前选择
     return jsonify({"ok": True, "removed": removed, "count": len(removed)})
 

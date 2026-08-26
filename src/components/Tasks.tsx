@@ -1,4 +1,4 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, createEffect } from "solid-js";
 import {
   tasks,
   patchTask,
@@ -14,6 +14,7 @@ import {
   downloadDirUrl,
   downloadFileUrl,
 } from "../api";
+import { refreshFiles } from "./Sidebar";
 
 const statusText: Record<string, string> = {
   queued: "排队中",
@@ -37,6 +38,31 @@ const fmtDur = (s?: number) =>
 export default function Tasks() {
   const [selected, setSelected] = createSignal<Set<string>>(new Set());
   const [collapsed, setCollapsed] = createSignal(false);
+  const [logModal, setLogModal] = createSignal<{ name: string; content: string } | null>(null);
+
+  // 任务完成且产生输出文件时，自动刷新左侧文件列表（产物回流）
+  let lastDone = "";
+  createEffect(() => {
+    const done = tasks
+      .filter((t) => t.status === "finished" && t.output_name)
+      .map((t) => `${t.task_id}:${t.output_name}`)
+      .join("|");
+    if (done && done !== lastDone) {
+      lastDone = done;
+      refreshFiles();
+    }
+  });
+
+  const copyLog = async () => {
+    const m = logModal();
+    if (!m) return;
+    try {
+      await navigator.clipboard.writeText(m.content);
+      pushToast("日志已复制", "success");
+    } catch {
+      pushToast("复制失败", "error");
+    }
+  };
 
   const toggleSelect = (id: string, checked: boolean) => {
     setSelected((prev) => {
@@ -54,8 +80,12 @@ export default function Tasks() {
   };
 
   const onCancel = async (id: string) => {
-    await cancelTask(id);
-    patchTask(id, { status: "cancelled" });
+    try {
+      await cancelTask(id);
+      patchTask(id, { status: "cancelled" });
+    } catch (e) {
+      pushToast(`取消失败：${(e as Error).message}`, "error");
+    }
   };
 
   const onDelete = async (id: string) => {
@@ -386,6 +416,16 @@ export default function Tasks() {
                           取消
                         </button>
                       </Show>
+                      <Show when={t.status === "failed" && t.log}>
+                        <button
+                          class="btn secondary small"
+                          onClick={() =>
+                            setLogModal({ name: t.name, content: t.log! })
+                          }
+                        >
+                          日志
+                        </button>
+                      </Show>
                       <button
                         class="btn danger small"
                         onClick={() => onDelete(t.task_id)}
@@ -403,6 +443,24 @@ export default function Tasks() {
             </For>
           </div>
         </Show>
+        </div>
+      </Show>
+
+      {/* ffmpeg 日志弹窗 */}
+      <Show when={logModal()}>
+        <div class="modal-mask" onClick={() => setLogModal(null)}>
+          <div class="modal log-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>{logModal()!.name} · ffmpeg 日志</h3>
+            <pre class="log-body">{logModal()!.content}</pre>
+            <div class="modal-actions">
+              <button class="btn secondary small" onClick={copyLog}>
+                复制全部
+              </button>
+              <button class="btn primary small" onClick={() => setLogModal(null)}>
+                关闭
+              </button>
+            </div>
+          </div>
         </div>
       </Show>
     </aside>

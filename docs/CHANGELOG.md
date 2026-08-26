@@ -8,7 +8,55 @@
 
 ## 待提交改动
 
-（无）
+### 2026-08-26 — P0 任务闭环：失败日志查看 + 取消接口修复
+- 涉及文件：`app.py`、`src/api.ts`、`src/components/Tasks.tsx`、`src/styles.css`、`docs/todo.md`
+
+**失败任务可查看 ffmpeg 日志**
+- 后端 `_run_ffmpeg_locked`：限制 `out_lines` 只保留尾部 600 行（防长任务内存膨胀）；进程结束后把 ffmpeg 输出（stderr 并入 stdout）整体存入 `task["log"]`，随任务记录持久化并经 SSE 推送。
+- 前端失败任务卡片新增「日志」按钮，弹窗展示完整日志（深色 `<pre>`、可滚动、`pre-wrap` 自动换行），复用 `.modal-mask` 遮罩。
+- `Task` 类型新增 `log?: string`。
+
+**处理中可取消（修复 404）**
+- 前端 `cancelTask` 之前请求复数路径 `/api/tasks/<id>/cancel`，后端只有单数 `/api/task/<id>/cancel`，取消按钮一直 404 失效 → 修正为单数路径。
+- `onCancel` 加 try/catch，失败时 toast 提示而非静默抛未捕获异常。
+
+**其他**
+- todo.md：P0 的「产物打开/下载」评估为不需要（已有查看/下载入口），标记完成项。
+
+### 2026-08-26 — P1 时间点输入体验：预览取帧打点
+- 涉及文件：`src/components/TimePickerModal.tsx`（新增）、`src/components/panels/SplitPanel.tsx`、`src/components/panels/ScreenshotPanel.tsx`、`src/styles.css`、`docs/todo.md`
+
+**改动**
+- 新增复用组件 `TimePickerModal`：弹窗内 `<video>`（preload=metadata + controls）播放/拖动定位目标画面，实时显示当前时间（HH:MM:SS，等宽数字），点动作按钮回调时间秒数；导出 `fmtHms` 工具函数；浏览器无法解码编码时提示手动输入。
+- 拆分面板「时间区间」每行新增「预览」按钮，弹窗内「设为起点 / 设为终点」直接写入该行 start/end（非受控 input 同步 DOM + store）。
+- 截图面板「单张」模式时间点旁新增「预览取帧」按钮，弹窗内「使用当前时间」回填输入框。
+- 样式：`.time-picker` 弹窗（视频占满、max-height 52vh、当前时间加粗）。
+
+### 2026-08-26 — P3 新一轮建议：高价值 + 中价值
+- 涉及文件：`app.py`、`src/api.ts`、`src/store.ts`、`src/App.tsx`、`src/components/panels/index.ts`、`src/components/panels/AudioExtractPanel.tsx`（新增）、`src/components/panels/MergePanel.tsx`、`src/components/panels/ConvertPanel.tsx`、`src/components/panels/CompressPanel.tsx`、`src/components/panels/ScreenshotPanel.tsx`、`src/components/panels/SplitPanel.tsx`、`src/components/Sidebar.tsx`、`src/components/Tasks.tsx`、`src/styles.css`、`docs/todo.md`
+
+**高价值-1 音频提取（第 11 个功能 Tab）**
+- 后端新增 `/api/extract_audio`：ffmpeg `-vn -map 0:a:0` 提取主音轨，输出 mp3（libmp3lame + 码率）/ m4a（aac）/ wav（pcm_s16le）/ flac；源文件无音频流返回 400 提示；源文件可来自上传目录或输出目录（产物可二次处理）。
+- 前端新增 `AudioExtractPanel`（格式 seg + 码率 seg + 无损提示），`TABS` 注册「音频提取」（音乐音符图标，置于调速与去字幕之间），`api.ts` 新增 `extractAudio`。
+- 冒烟验证：对 `sample_v3.mp4` 提取 mp3 128k，任务 finished，产物 `audio_*.mp3` 落盘。
+
+**高价值-2 合并文件顺序可拖拽调整**
+- `MergePanel` 每行支持 HTML5 拖拽重排（`draggable` + dragstart/drop 重排 picked 数组），并保留 ↑ / ↓ 按钮；拖拽中半透明虚线、悬停目标行高亮（`.merge-row.dragging / .drag-over`）。
+
+**高价值-3 输出文件回流左侧列表**
+- 后端 `/api/files` 改为合并列出上传目录 + 输出目录产物（`location: uploads|outputs`，同名去重、按 mtime 排序）；排除 `thumb_*` 缩略图、`*.zip` 打包产物、`merge_list_*` 合并清单中间文件。
+- 删除接口（单个/批量）均支持产物文件：优先上传目录，其次输出目录。
+- 前端 `Tasks.tsx`：任务完成且带 `output_name` 时自动 `refreshFiles()`，产物即时出现在左侧；`Sidebar` 产物卡片显示「产物」徽标（`.file-badge`）。
+
+**中价值-1 面板参数记忆**
+- `store.ts` 新增 `persistSignal(key, fallback)`：带 localStorage 持久化的 signal（读时 JSON.parse、写时自动落盘，异常静默）。
+- 接入面板：转换（目标格式/CRF/编码器）、压缩（预设/CRF/分辨率/编码）、截图（模式/间隔/格式）、拆分（方式/每段时长/静音/输出/编码）；音频提取面板初版未接入（后续可选）。
+
+**中价值-2 左侧文件搜索框**
+- `Sidebar` 文件列表顶部新增搜索输入框（`.file-search`），按文件名过滤展示（`createMemo`），无匹配时显示空态提示；搜索不影响全选/计数。
+
+**中价值-3 日志弹窗一键复制**
+- 失败日志弹窗新增「复制全部」按钮（`navigator.clipboard.writeText` + toast 反馈）。
 
 ---
 

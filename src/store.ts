@@ -2,6 +2,36 @@ import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { StoredFile, Region, Task } from "./api";
 
+// ---- 面板参数记忆（localStorage）----
+function readPersist<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+/** 带 localStorage 持久化的 signal：刷新/切换面板后参数自动回填 */
+export function persistSignal<T>(
+  key: string,
+  fallback: T
+): [() => T, (v: T) => void] {
+  const [v, setV] = createSignal<T>(readPersist(key, fallback));
+  return [
+    v,
+    (next: T) => {
+      setV(next);
+      try {
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {
+        /* 忽略配额等异常 */
+      }
+    },
+  ];
+}
+
 // ---- 全局响应式状态 ----
 // 用 Solid 的 store 保存任务列表：更新某个 task 的 progress 时只触发该字段
 // 的细粒度更新（编译时自动拆分），不会重绘整个列表 —— 这正是消除 Elements
@@ -17,7 +47,8 @@ export type TabKey =
   | "merge"
   | "rotate"
   | "watermark"
-  | "speed";
+  | "speed"
+  | "audio";
 
 // icon 为 stroke 风格 SVG path（viewBox 0 0 24 24），在 Tab 栏内渲染
 export const TABS: { key: TabKey; label: string; icon: string[] }[] = [
@@ -68,6 +99,11 @@ export const TABS: { key: TabKey; label: string; icon: string[] }[] = [
     key: "speed",
     label: "调速",
     icon: ["M13 2 3 14h9l-1 8 10-12h-9l1-8Z"],
+  },
+  {
+    key: "audio",
+    label: "音频提取",
+    icon: ["M9 18V5l12-2v13", "M9 9l12-2", "M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z", "M21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"],
   },
   {
     key: "desubtitle",

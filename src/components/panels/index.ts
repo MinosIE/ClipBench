@@ -7,3 +7,4 @@ export { default as MergePanel } from "./MergePanel";
 export { default as RotatePanel } from "./RotatePanel";
 export { default as WatermarkPanel } from "./WatermarkPanel";
 export { default as SpeedPanel } from "./SpeedPanel";
+export { default as AudioExtractPanel } from "./AudioExtractPanel";

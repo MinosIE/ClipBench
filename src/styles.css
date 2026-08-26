@@ -286,6 +286,24 @@ button {
   background: #eef1f7;
   color: var(--text);
 }
+.file-search {
+  padding: 0 10px 8px;
+}
+.file-search input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 12px;
+  outline: none;
+}
+.file-search input:focus {
+  border-color: var(--accent);
+}
+
 .bulkbar {
   display: flex;
   align-items: center;
@@ -359,6 +377,18 @@ button {
 .file-meta {
   color: var(--muted);
   font-size: 11px;
+}
+.file-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 16px;
+  border-radius: 4px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  vertical-align: 1px;
 }
 .mi-codec {
   display: flex;
@@ -502,6 +532,20 @@ button {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px 8px;
+}
+.merge-list .merge-row {
+  cursor: grab;
+}
+.merge-list .merge-row:active {
+  cursor: grabbing;
+}
+.merge-list .merge-row.dragging {
+  opacity: 0.4;
+  border-style: dashed;
+}
+.merge-list .merge-row.drag-over {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
 }
 .merge-name {
   flex: 1;
@@ -1705,6 +1749,39 @@ input[type="range"]::-moz-range-thumb {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+/* 预览取帧弹窗：视频占满、当前时间等宽数字 */
+.time-picker {
+  width: min(680px, 92vw);
+}
+.time-picker video {
+  width: 100%;
+  max-height: 52vh;
+  background: #000;
+  border-radius: 8px;
+  margin: 4px 0 12px;
+}
+.picker-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+/* ffmpeg 日志弹窗：更宽 + 深色可滚动正文 */
+.log-modal {
+  width: min(720px, 92vw);
+}
+.log-body {
+  max-height: 60vh;
+  overflow: auto;
+  background: #0d1421;
+  color: #d8e1ee;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 12px 14px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0 0 16px;
 }
 
 /* ---------- Toast ---------- */

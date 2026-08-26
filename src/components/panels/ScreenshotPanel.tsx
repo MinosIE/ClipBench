@@ -1,13 +1,15 @@
 import { createSignal, Show } from "solid-js";
-import { selectedId, pushToast, upsertTask } from "../../store";
+import { selectedId, pushToast, upsertTask, persistSignal } from "../../store";
 import { screenshotVideo } from "../../api";
+import TimePickerModal, { fmtHms } from "../../components/TimePickerModal";
 
 export default function ScreenshotPanel() {
-  const [mode, setMode] = createSignal<"single" | "every">("single");
+  const [mode, setMode] = persistSignal<"single" | "every">("cb.screenshot.mode", "single");
   const [time, setTime] = createSignal("00:00:01");
-  const [format, setFormat] = createSignal<"jpg" | "png">("jpg");
-  const [interval, setInterval] = createSignal(5);
+  const [format, setFormat] = persistSignal<"jpg" | "png" | "webp" | "avif">("cb.screenshot.format", "jpg");
+  const [interval, setInterval] = persistSignal<number>("cb.screenshot.interval", 5);
   const [busy, setBusy] = createSignal(false);
+  const [previewOpen, setPreviewOpen] = createSignal(false);
 
   const submit = async () => {
     if (!selectedId()) {
@@ -71,6 +73,12 @@ export default function ScreenshotPanel() {
               onInput={(e) => setTime(e.currentTarget.value)}
               style={{ width: "130px" }}
             />
+            <button
+              class="btn secondary small"
+              onClick={() => setPreviewOpen(true)}
+            >
+              预览取帧
+            </button>
           </div>
         </Show>
 
@@ -124,6 +132,23 @@ export default function ScreenshotPanel() {
         </div>
 
       </div>
+
+      <Show when={previewOpen() && selectedId()}>
+        <TimePickerModal
+          videoName={selectedId()!}
+          title="预览取帧"
+          onClose={() => setPreviewOpen(false)}
+          actions={[
+            {
+              label: "使用当前时间",
+              onPick: (sec) => {
+                setTime(fmtHms(sec));
+                setPreviewOpen(false);
+              },
+            },
+          ]}
+        />
+      </Show>
 
       <aside class="panel-aside">
         <h4>截图贴士</h4>

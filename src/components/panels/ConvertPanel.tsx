@@ -1,5 +1,5 @@
 import { createSignal, Show, For } from "solid-js";
-import { selectedId, pushToast, upsertTask, faststartEnabled } from "../../store";
+import { selectedId, pushToast, upsertTask, faststartEnabled, persistSignal } from "../../store";
 import { convertVideo } from "../../api";
 
 const TARGETS = [
@@ -13,9 +13,9 @@ const TARGETS = [
 ] as const;
 
 export default function ConvertPanel() {
-  const [target, setTarget] = createSignal<string>("mp4");
-  const [crf, setCrf] = createSignal(23);
-  const [vcodec, setVcodec] = createSignal<string>("libx264");
+  const [target, setTarget] = persistSignal<string>("cb.convert.target", "mp4");
+  const [crf, setCrf] = persistSignal<number>("cb.convert.crf", 23);
+  const [vcodec, setVcodec] = persistSignal<string>("cb.convert.vcodec", "libx264");
   const [busy, setBusy] = createSignal(false);
 
   const isAudio = () => target() === "mp3" || target() === "m4a";

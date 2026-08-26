@@ -59,6 +59,7 @@ export interface StoredFile {
   size: number;
   uploaded_at: number;
   display_size?: string;
+  location?: "uploads" | "outputs"; // 后端返回：上传文件 / 输出产物
   is_video?: boolean;
   width?: number;
   height?: number;
@@ -115,6 +116,7 @@ export interface Task {
   scale?: string;
   src_duration?: number; // 源总时长（秒）
   processed_duration?: number; // 实际处理时长（秒）
+  log?: string; // ffmpeg 输出日志（尾部若干行，含 stderr），用于失败排查
   // 拆分任务结果信息（后端完成后写入）
   split_mode?: string; // segment | time
   encode?: "copy" | "reencode"; // 拆分采用的编码方式
@@ -132,6 +134,7 @@ function mapFile(raw: any): StoredFile {
     size: raw.size ?? meta.size ?? 0,
     uploaded_at: raw.uploaded_at ?? 0,
     display_size: raw.size_human ?? meta.size_human,
+    location: raw.location,
     is_video: meta.has_video ?? meta.width != null,
     width: meta.width,
     height: meta.height,
@@ -206,7 +209,8 @@ export async function listTasks(): Promise<Task[]> {
 }
 
 export async function cancelTask(taskId: string): Promise<void> {
-  await jsonFetch(`/api/tasks/${encodeURIComponent(taskId)}/cancel`, {
+  // 注意：后端路由为单数 /api/task/<id>/cancel（与 /api/task/<id>、/api/task/<id>/delete 一致）
+  await jsonFetch(`/api/task/${encodeURIComponent(taskId)}/cancel`, {
     method: "POST",
   });
 }
@@ -434,6 +438,19 @@ export async function speedVideo(params: {
   faststart?: boolean;
 }): Promise<{ task_id: string }> {
   return jsonFetch("/api/speed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+}
+
+// ---------- 音频提取 ----------
+export async function extractAudio(params: {
+  file_id: string;
+  format: "mp3" | "wav" | "flac" | "m4a";
+  bitrate?: string;
+}): Promise<{ task_id: string }> {
+  return jsonFetch("/api/extract_audio", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),

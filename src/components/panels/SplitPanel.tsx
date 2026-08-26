@@ -1,6 +1,7 @@
 import { createSignal, Show, For } from "solid-js";
-import { selectedId, pushToast, confirmModal, upsertTask } from "../../store";
+import { selectedId, pushToast, confirmModal, upsertTask, persistSignal } from "../../store";
 import { splitVideo } from "../../api";
+import TimePickerModal from "../../components/TimePickerModal";
 
 interface Seg {
   start: string;
@@ -8,17 +9,18 @@ interface Seg {
 }
 
 export default function SplitPanel() {
-  const [mode, setMode] = createSignal<"segment" | "time">("segment");
-  const [segment, setSegment] = createSignal(60);
-  const [mute, setMute] = createSignal(false);
-  const [output, setOutput] = createSignal<"video" | "gif">("video");
-  const [encode, setEncode] = createSignal<"copy" | "reencode">("reencode");
+  const [mode, setMode] = persistSignal<"segment" | "time">("cb.split.mode", "segment");
+  const [segment, setSegment] = persistSignal<number>("cb.split.segment", 60);
+  const [mute, setMute] = persistSignal<boolean>("cb.split.mute", false);
+  const [output, setOutput] = persistSignal<"video" | "gif">("cb.split.output", "video");
+  const [encode, setEncode] = persistSignal<"copy" | "reencode">("cb.split.encode", "reencode");
   const [segments, setSegments] = createSignal<Seg[]>([
     { start: "00:00:00", end: "00:00:10" },
   ]);
   const [gifFps, setGifFps] = createSignal(15);
   const [gifWidth, setGifWidth] = createSignal(480);
   const [busy, setBusy] = createSignal(false);
+  const [previewSeg, setPreviewSeg] = createSignal<number | null>(null);
 
   const addSeg = () =>
     setSegments([...segments(), { start: "00:00:00", end: "00:00:10" }]);
@@ -223,46 +225,79 @@ export default function SplitPanel() {
                     if (endEl && endEl.value === "") endEl.value = s.end;
                   });
                   return (
-                    <div class="seg-row">
-                      <input
-                        ref={startEl}
-                        type="text"
-                        placeholder="00:00:00"
-                        // 完全不设 value，DOM 自己持有输入态
-                        onBlur={() => syncSeg(i(), "start", startEl.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") startEl.blur();
-                        }}
-                        style={{ width: "100px" }}
-                      />
-                      <span>→</span>
-                      <input
-                        ref={endEl}
-                        type="text"
-                        placeholder="00:00:10"
-                        onBlur={() => syncSeg(i(), "end", endEl.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") endEl.blur();
-                        }}
-                        style={{ width: "100px" }}
-                      />
-                      <span
-                        class="seg-dur"
-                        title={durSec() != null ? `本段时长 ${durSec()}s` : ""}
-                      >
-                        {durSec() != null ? `${durSec().toFixed(1)}s` : ""}
-                      </span>
-                      <Show when={isOverlapWithPrev()}>
-                        <span class="seg-warn">{isOverlapWithPrev()}</span>
+                    <>
+                      <div class="seg-row">
+                        <input
+                          ref={startEl}
+                          type="text"
+                          placeholder="00:00:00"
+                          // 完全不设 value，DOM 自己持有输入态
+                          onBlur={() => syncSeg(i(), "start", startEl.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") startEl.blur();
+                          }}
+                          style={{ width: "100px" }}
+                        />
+                        <span>→</span>
+                        <input
+                          ref={endEl}
+                          type="text"
+                          placeholder="00:00:10"
+                          onBlur={() => syncSeg(i(), "end", endEl.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") endEl.blur();
+                          }}
+                          style={{ width: "100px" }}
+                        />
+                        <span
+                          class="seg-dur"
+                          title={durSec() != null ? `本段时长 ${durSec()}s` : ""}
+                        >
+                          {durSec() != null ? `${durSec().toFixed(1)}s` : ""}
+                        </span>
+                        <Show when={isOverlapWithPrev()}>
+                          <span class="seg-warn">{isOverlapWithPrev()}</span>
+                        </Show>
+                        <button
+                          class="btn secondary small"
+                          onClick={() => setPreviewSeg(i())}
+                        >
+                          预览
+                        </button>
+                        <button
+                          class="btn danger small"
+                          onClick={() => removeSeg(i())}
+                          disabled={segments().length <= 1}
+                        >
+                          删除
+                        </button>
+                      </div>
+                      <Show when={previewSeg() === i() && selectedId()}>
+                        <TimePickerModal
+                          videoName={selectedId()!}
+                          title={`预览取帧 · 第 ${i() + 1} 段`}
+                          onClose={() => setPreviewSeg(null)}
+                          actions={[
+                            {
+                              label: "设为起点",
+                              onPick: (sec) => {
+                                startEl.value = fmtHms(sec);
+                                syncSeg(i(), "start", startEl.value);
+                                setPreviewSeg(null);
+                              },
+                            },
+                            {
+                              label: "设为终点",
+                              onPick: (sec) => {
+                                endEl.value = fmtHms(sec);
+                                syncSeg(i(), "end", endEl.value);
+                                setPreviewSeg(null);
+                              },
+                            },
+                          ]}
+                        />
                       </Show>
-                      <button
-                        class="btn danger small"
-                        onClick={() => removeSeg(i())}
-                        disabled={segments().length <= 1}
-                      >
-                        删除
-                      </button>
-                    </div>
+                    </>
                   );
                 }}
               </For>

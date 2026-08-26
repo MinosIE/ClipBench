@@ -5,6 +5,7 @@ import {
   pushToast,
   upsertTask,
   faststartEnabled,
+  persistSignal,
 } from "../../store";
 import { compressVideo, compressSuggest, CompressSuggestion } from "../../api";
 
@@ -24,13 +25,14 @@ const SCALES = [
 ] as const;
 
 export default function CompressPanel() {
-  const [preset, setPreset] = createSignal<string>("medium");
-  const [crf, setCrf] = createSignal(23);
-  const [scale, setScale] = createSignal<"original" | "1080" | "720" | "480">(
+  const [preset, setPreset] = persistSignal<string>("cb.compress.preset", "medium");
+  const [crf, setCrf] = persistSignal<number>("cb.compress.crf", 23);
+  const [scale, setScale] = persistSignal<"original" | "1080" | "720" | "480">(
+    "cb.compress.scale",
     "original"
   );
   // 输出编码：h264(默认，浏览器/设备通用) | hevc(体积更小，仅部分设备可播)
-  const [vcodec, setVcodec] = createSignal<"h264" | "hevc">("h264");
+  const [vcodec, setVcodec] = persistSignal<"h264" | "hevc">("cb.compress.vcodec", "h264");
   const [busy, setBusy] = createSignal(false);
 
   // 智能建议由后端统一计算（/api/compress_suggest），前端不写死任何阈值

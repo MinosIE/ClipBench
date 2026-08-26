@@ -1,4 +1,4 @@
-import { createSignal, Show, For } from "solid-js";
+import { createSignal, Show, For, createMemo } from "solid-js";
 import {
   files,
   setFiles,
@@ -38,6 +38,14 @@ export async function refreshFiles() {
 export default function Sidebar() {
   const [drag, setDrag] = createSignal(false);
   const [collapsed, setCollapsed] = createSignal(false);
+  const [search, setSearch] = createSignal("");
+
+  // 文件名搜索过滤（不影响全选/计数，仅过滤展示）
+  const filtered = createMemo(() => {
+    const q = search().trim().toLowerCase();
+    if (!q) return files;
+    return files.filter((f) => f.name.toLowerCase().includes(q));
+  });
 
   // 侧栏底部 dropzone 拖拽上传（顶栏也有「+ 上传文件」入口）
   const onUpload = async (fileList: FileList | null) => {
@@ -130,6 +138,17 @@ export default function Sidebar() {
         </div>
       </div>
 
+      <Show when={!collapsed()}>
+        <div class="file-search">
+          <input
+            type="text"
+            placeholder="搜索文件名…"
+            value={search()}
+            onInput={(e) => setSearch(e.currentTarget.value)}
+          />
+        </div>
+      </Show>
+
       <div class="bulkbar">
         <label>
           <input
@@ -160,7 +179,11 @@ export default function Sidebar() {
           when={files.length > 0}
           fallback={<div class="empty">暂无文件，请上传</div>}
         >
-          <For each={files}>
+          <Show
+            when={filtered().length > 0}
+            fallback={<div class="empty">没有匹配「{search()}」的文件</div>}
+          >
+          <For each={filtered()}>
             {(f) => (
               <div
                 class={`file-card ${selectedId() === f.name ? "selected" : ""}`}
@@ -185,6 +208,9 @@ export default function Sidebar() {
                 <div class="file-info">
                   <div class="file-name" title={f.name}>
                     {f.name}
+                    <Show when={f.location === "outputs"}>
+                      <span class="file-badge" title="输出产物">产物</span>
+                    </Show>
                   </div>
                   <div class="file-meta">
                     {f.display_size ?? (f.size ? (f.size / 1e6).toFixed(1) + " MB" : "")}
@@ -210,6 +236,7 @@ export default function Sidebar() {
               </div>
             )}
           </For>
+          </Show>
         </Show>
       </div>
 

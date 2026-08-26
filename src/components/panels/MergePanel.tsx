@@ -23,6 +23,8 @@ export default function MergePanel() {
   const [picked, setPicked] = createSignal<string[]>([]);
   const [busy, setBusy] = createSignal(false);
   const [encode, setEncode] = createSignal<"h264" | "hevc" | "copy">("h264");
+  const [dragIdx, setDragIdx] = createSignal<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = createSignal<number | null>(null);
 
   const toggle = (name: string) =>
     setPicked((prev) =>
@@ -37,6 +39,19 @@ export default function MergePanel() {
       const j = idx + dir;
       if (j < 0 || j >= next.length) return prev;
       [next[idx], next[j]] = [next[j], next[idx]];
+      return next;
+    });
+  };
+
+  // 拖拽调整顺序（HTML5 DnD）
+  const dropAt = (idx: number) => {
+    const from = dragIdx();
+    setDragIdx(null);
+    if (from == null || from === idx) return;
+    setPicked((prev) => {
+      const next = prev.slice();
+      const [x] = next.splice(from, 1);
+      next.splice(idx, 0, x);
       return next;
     });
   };
@@ -128,7 +143,24 @@ export default function MergePanel() {
             <div class="merge-list">
               <For each={picked()}>
                 {(name, i) => (
-                  <div class="row">
+                  <div
+                    class="row merge-row"
+                    classList={{
+                      dragging: dragIdx() === i(),
+                      "drag-over": dragOverIdx() === i() && dragIdx() !== i(),
+                    }}
+                    draggable
+                    onDragStart={() => setDragIdx(i())}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverIdx(i());
+                    }}
+                    onDrop={() => dropAt(i())}
+                    onDragEnd={() => {
+                      setDragIdx(null);
+                      setDragOverIdx(null);
+                    }}
+                  >
                     <span class="badge">{i() + 1}</span>
                     <span class="merge-name">{name}</span>
                     <span class="merge-meta">{fileInfo(name)}</span>
@@ -235,7 +267,7 @@ export default function MergePanel() {
         <h4>合并贴士</h4>
         <ul>
           <li>勾选 ≥2 个文件即可合并，顺序即拼接顺序。</li>
-          <li>用 ↑ / ↓ 调整先后。</li>
+          <li>用 ↑ / ↓ 或直接拖拽调整先后。</li>
           <li>分辨率/编码不同的片段会自动统一为一种参数。</li>
           <li>长视频建议先压缩再合并，更省时。</li>
         </ul>

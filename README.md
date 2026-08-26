@@ -1,6 +1,6 @@
 # ClipBench
 
-本地视频处理工具箱 —— 基于 Flask + ffmpeg 的后端与 SolidJS + Vite 的前端，提供**去字幕、拆分、截图、格式转换、压缩、裁剪、合并、旋转、水印、调速** 10 个常用功能。所有处理都在本机完成，不上传任何数据。
+本地视频处理工具箱 —— 基于 Flask + ffmpeg 的后端与 SolidJS + Vite 的前端，提供**去字幕、拆分、截图、格式转换、压缩、裁剪、合并、旋转、水印、调速、音频提取** 11 个常用功能。所有处理都在本机完成，不上传任何数据。
 
 - 端口：**8080**（可用 `PORT` 环境变量修改；默认避开 macOS AirPlay 占用的 5000 端口）
 - 语言：Python 3.10+ / TypeScript
@@ -22,6 +22,7 @@
 | 旋转 | 旋转 + 水平/垂直翻转，可预览 | 90° / 180° / 270° / 水平翻转 / 垂直翻转 |
 | 水印 | 文字或图片水印，5 个角位 + 缩放 + 透明度 | 类型：文字 / 图片（支持 PNG 等透明图）；位置：左上/右上/左下/右下/居中；文字字号、颜色、描边；图片缩放比、透明度 |
 | 调速 | 0.5x–4x 变速，支持倒放 | 速度（0.5–4.0，步进 0.1）；倒放开关 |
+| 音频提取 | 提取视频音轨或转码纯音频，导出 mp3 / m4a / wav / flac | 格式；码率（mp3/m4a：128k / 192k / 320k；wav/flac 无损无码率） |
 
 ### 右侧媒体信息卡片
 
@@ -95,6 +96,7 @@ python app.py
 | POST | `/api/watermark` | 水印：`{file_id, type, text/image, position, size, opacity}` |
 | POST | `/api/upload_watermark` | 上传水印图片，返回 `watermark_id` |
 | POST | `/api/speed` | 调速：`{file_id, speed, reverse}` |
+| POST | `/api/extract_audio` | 音频提取：`{file_id, format: mp3/m4a/wav/flac, bitrate?}`（源可来自上传或输出目录） |
 | GET | `/api/tasks` | 所有任务及状态 |
 | GET | `/api/tasks/stream` | SSE：任务状态实时推送 |
 | GET | `/api/task/<task_id>` | 单个任务详情（未找到返回 404） |
@@ -127,7 +129,7 @@ clipbench/
 │   ├── store.ts           # 全局状态（文件列表、任务、Tab 定义）
 │   ├── api.ts             # 后端 API 封装
 │   ├── sse.ts             # SSE 进度订阅
-│   ├── components/        # Sidebar、Workbench、panels/（10 个功能面板）
+│   ├── components/        # Sidebar、Workbench、panels/（11 个功能面板）
 │   └── styles.css         # 全部样式（暗色主题）
 ├── static/                # 静态资源（favicon 等）
 ├── uploads/               # 上传文件目录（运行时自动创建）
@@ -168,12 +170,12 @@ python -m pytest tests/test_app.py -v
 覆盖范围：`tests/test_app.py` 包含——
 
 - **单元测试**：文件大小格式化、时间解析、片段校验、扩展名白名单、faststart 逻辑等纯函数；
-- **API 测试**（Flask test client，隔离的临时目录）：文件列表、上传/删除、版本探测、10 个功能的参数校验、任务查询/取消/删除、SSE 流、下载 404；
+- **API 测试**（Flask test client，隔离的临时目录）：文件列表、上传/删除、版本探测、11 个功能的参数校验、任务查询/取消/删除、SSE 流、下载 404；
 - **端到端流程**：上传样例视频 → 拆分 → 等待任务成功 → 校验输出文件（缺少 ffmpeg 时自动跳过）。
 
 ### 手工测试清单
 
-见 [`tests/manual-test.md`](tests/manual-test.md)，覆盖 10 个功能面板的 UI 与完整操作流程、SSE 进度、编码信息展示等。
+见 [`tests/manual-test.md`](tests/manual-test.md)，覆盖 11 个功能面板的 UI 与完整操作流程、SSE 进度、编码信息展示等。
 
 ---
 
