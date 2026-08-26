@@ -15,7 +15,7 @@
 ## 已提交记录
 
 ### 2026-08-26 — 左右栏折叠功能（含细节打磨）
-- 提交哈希：`待提交后回填`
+- 提交哈希：`841eadf`
 - 涉及文件：`src/components/Sidebar.tsx`、`src/components/Tasks.tsx`、`src/styles.css`、`docs/CHANGELOG.md`
 
 **折叠功能**
