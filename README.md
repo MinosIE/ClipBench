@@ -13,12 +13,12 @@
 | 模块 | 说明 | 关键参数 |
 | --- | --- | --- |
 | 去字幕 | 移除视频中的硬字幕区域，支持 4 种模式 | 模式：边缘修复 delogo / 模糊 / 马赛克 / 内容感知修复 inpaint；区域选择：整行 / 指定顶部、底部高度；CPU 密集任务**串行排队**执行（inpaint 互斥闸门，避免并发饿死） |
-| 拆分 | 按固定时长或自定义片段拆分，可输出 GIF | 拆分模式：按时长 / 按片段；片段时间轴输入；目标格式：mp4 / gif |
-| 截图 | 单帧截图或按固定间隔批量截帧 | 时间点 / 间隔秒数；输出 jpg / png |
+| 拆分 | 按固定时长或自定义片段拆分，可输出 GIF | 拆分模式：按时长 / 按片段；片段时间轴输入；目标格式：mp4 / gif；编码方式：重编码 H.264（默认，段首强制关键帧避免黑屏）/ 保留原编码（极速无损） |
+| 截图 | 单帧截图或按固定间隔批量截帧 | 时间点 / 间隔秒数；输出 jpg / png / webp / avif |
 | 格式转换 | 任意格式互转，支持 mp4 / mkv / webm / mov / avi / gif 等 | 目标格式；可选：重编码开关 + CRF 画质档位、音频开关、`-movflags +faststart` 快速启动（便于网页播放） |
 | 压缩 | 压缩体积，**自动识别源编码** | 源为 H.264 → `libx264` + CRF 自适应；源为 HEVC/H.265 → `libx265` + 自适应 CRF（保留 HDR10+ 与 master-display 元数据，兼容字幕烧录等场景）；可选分辨率缩放（不缩放 / 720p / 480p / 360p）、视频/音频码率、`+faststart` |
 | 裁剪 | 在预览图上拖拽选区裁剪，支持自定义区域 | 选区 / 固定尺寸 16:9、9:16、1:1、4:3 |
-| 合并 | 2 个及以上视频按顺序拼接 | concat demuxer（相同参数直接无损复制） |
+| 合并 | 2 个及以上视频按顺序拼接 | 编码：H.264（默认，兼容最好）/ HEVC（体积更小）/ 保留原编码（copy，极速零损，要求各源参数一致，前端预检不通过不发请求） |
 | 旋转 | 旋转 + 水平/垂直翻转，可预览 | 90° / 180° / 270° / 水平翻转 / 垂直翻转 |
 | 水印 | 文字或图片水印，5 个角位 + 缩放 + 透明度 | 类型：文字 / 图片（支持 PNG 等透明图）；位置：左上/右上/左下/右下/居中；文字字号、颜色、描边；图片缩放比、透明度 |
 | 调速 | 0.5x–4x 变速，支持倒放 | 速度（0.5–4.0，步进 0.1）；倒放开关 |
@@ -85,12 +85,12 @@ python app.py
 | POST | `/api/upload` | 上传媒体文件（表单字段 `file`；单文件上限 4GB） |
 | POST | `/api/delete_uploads` | 按文件名批量删除上传文件（防目录穿越） |
 | POST | `/api/desubtitle` | 去字幕：`{file_id, mode, top, bottom, full_width}` |
-| POST | `/api/split` | 拆分：`{file_id, mode, interval/segments, format}` |
-| POST | `/api/screenshot` | 截图：`{file_id, time, interval, format}` |
+| POST | `/api/split` | 拆分：`{file_id, mode, interval/segments, format, encode}`（`encode`：`reencode` 重编码 H.264 默认 / `copy` 保留原编码） |
+| POST | `/api/screenshot` | 截图：`{file_id, time, interval, format}`（jpg / png / webp / avif） |
 | POST | `/api/convert` | 转码：`{file_id, target_format, reencode, crf, audio, faststart}` |
 | POST | `/api/compress` | 压缩：`{file_id, crf, scale, video_bitrate, audio_bitrate, faststart}`（自动选择 x264/x265） |
 | POST | `/api/crop` | 裁剪：`{file_id, x, y, w, h}` |
-| POST | `/api/merge` | 合并：`{file_ids}`（≥2 个） |
+| POST | `/api/merge` | 合并：`{file_ids, encode, faststart}`（≥2 个；`encode`：`h264` 默认 / `hevc` / `copy` 保留原编码） |
 | POST | `/api/rotate` | 旋转/翻转：`{file_id, rotation, flip}` |
 | POST | `/api/watermark` | 水印：`{file_id, type, text/image, position, size, opacity}` |
 | POST | `/api/upload_watermark` | 上传水印图片，返回 `watermark_id` |
