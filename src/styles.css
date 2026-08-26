@@ -735,6 +735,23 @@ button {
   font-weight: 600;
   color: var(--muted);
 }
+/* 左右布局变体：label 在左、控件在右，适合拆分面板这类字段较少的场景 */
+.field.row {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  min-width: 0;
+}
+.field.row > label {
+  flex: 0 0 92px;
+  text-align: right;
+  margin: 0;
+}
+.field.row > input[type="number"],
+.field.row > input[type="text"] {
+  max-width: 200px;
+}
 input[type="text"],
 input[type="number"],
 input[type="password"],
@@ -992,6 +1009,16 @@ input[type="range"]::-moz-range-thumb {
   align-items: center;
   gap: 8px;
   flex-wrap: nowrap;
+}
+.seg-dur {
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 50px;
+}
+.seg-warn {
+  font-size: 11px;
+  color: var(--danger);
+  white-space: nowrap;
 }
 .form-card.grid2 > .field {
   min-width: 0;

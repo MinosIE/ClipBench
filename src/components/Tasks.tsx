@@ -218,6 +218,39 @@ export default function Tasks() {
                     </div>
                   </Show>
 
+                  {/* 拆分任务完成后的输出基本信息（横排紧凑 chips） */}
+                  <Show
+                    when={
+                      t.kind === "split" &&
+                      t.status === "finished" &&
+                      t.out_size
+                    }
+                  >
+                    <div class="cc-params">
+                      <span>输出 {t.out_size_human || "—"}</span>
+                      <Show when={t.out_count && t.out_count > 1}>
+                        <span>{t.out_count} 个片段</span>
+                      </Show>
+                      <Show when={t.encode}>
+                        <span class="cc-tag">
+                          {t.encode === "copy" ? "保留原编码" : "重编码 H.264"}
+                        </span>
+                      </Show>
+                      <Show when={t.out_codec}>
+                        <span class="cc-codec">{t.out_codec}</span>
+                      </Show>
+                      <Show when={t.out_resolution}>
+                        <span>{t.out_resolution}</span>
+                      </Show>
+                      <Show when={t.out_duration != null}>
+                        <span>
+                          时长 {fmtDur(t.out_duration)}
+                          {t.out_count && t.out_count > 1 ? " (首段)" : ""}
+                        </span>
+                      </Show>
+                    </div>
+                  </Show>
+
                   {/* 压缩参数（预设/CRF/编码/缩放），供回看任务时对照 */}
                   <Show
                     when={
@@ -286,20 +319,29 @@ export default function Tasks() {
                       </Show>
                     </div>
 
-                    <Show when={t.output_name && t.status === "finished"}>
+                    <Show
+                      when={
+                        t.status === "finished" &&
+                        (t.output_name || t.output_dir)
+                      }
+                    >
                       <div class="task-result">
-                        <a href={outputUrl(t.output_name!)} target="_blank">
-                          查看单个结果
-                        </a>
+                        {/* 单文件结果：查看 + 下载 */}
                         <Show
-                          when={t.output_dir}
-                          fallback={
-                            <a href={downloadFileUrl(t.output_name!)}>
-                              下载结果
-                            </a>
-                          }
+                          when={t.output_name && !t.output_dir}
                         >
-                          <a href={downloadDirUrl(t.task_id)}>下载完整输出</a>
+                          <a href={outputUrl(t.output_name!)} target="_blank">
+                            查看单个结果
+                          </a>
+                          <a href={downloadFileUrl(t.output_name!)}>
+                            下载结果
+                          </a>
+                        </Show>
+                        {/* 多文件结果（目录）：打包下载压缩包 */}
+                        <Show when={t.output_dir}>
+                          <a href={downloadDirUrl(t.task_id)}>
+                            下载压缩包（{t.out_count ? `${t.out_count} 个文件` : "全部"}）
+                          </a>
                         </Show>
                       </div>
                     </Show>

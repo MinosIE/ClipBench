@@ -84,6 +84,11 @@ export interface Task {
   scale?: string;
   src_duration?: number; // 源总时长（秒）
   processed_duration?: number; // 实际处理时长（秒）
+  // 拆分任务结果信息（后端完成后写入）
+  split_mode?: string; // segment | time
+  encode?: "copy" | "reencode"; // 拆分采用的编码方式
+  out_duration?: number; // 单片段时长（秒，多片段取首个文件）
+  out_count?: number; // 输出文件数量
 }
 
 // ---------- 文件 ----------
@@ -225,6 +230,7 @@ export async function splitVideo(params: {
   segment?: number;
   mute?: boolean;
   output?: "video" | "gif";
+  encode?: "copy" | "reencode";
   start?: string;
   end?: string;
   segments?: { start: string; end: string }[];

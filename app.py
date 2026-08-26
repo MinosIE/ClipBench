@@ -475,16 +475,31 @@ def _finalize(args, out, faststart=False):
     return args
 
 
-def run_ffmpeg(args, task_id, workdir):
-    """执行 ffmpeg，将进度写入任务（受并发闸门限流，排队时状态为 queued）"""
+def run_ffmpeg(args, task_id, workdir, seg_index=0, seg_total=1):
+    """执行单条 ffmpeg 命令（受并发闸门限流，排队时状态为 queued）"""
     ffmpeg_acquire(task_id)
     try:
-        _run_ffmpeg_locked(args, task_id, workdir)
+        _run_ffmpeg_locked(args, task_id, workdir, seg_index, seg_total)
     finally:
         ffmpeg_release()
 
 
-def _run_ffmpeg_locked(args, task_id, workdir):
+def run_ffmpeg_list(args_list, task_id, workdir):
+    """串行执行多条 ffmpeg 命令（每条单独受闸门限流，进度按段数均摊）"""
+    total = len(args_list)
+    for i, args in enumerate(args_list):
+        ffmpeg_acquire(task_id)
+        try:
+            _run_ffmpeg_locked(args, task_id, workdir, i, total)
+        finally:
+            ffmpeg_release()
+        # 任一段失败/取消则整体停止
+        task = TASKS.get(task_id)
+        if task is None or task.get("status") in ("failed", "cancelled"):
+            return
+
+
+def _run_ffmpeg_locked(args, task_id, workdir, seg_index=0, seg_total=1):
     """执行 ffmpeg，将进度写入任务（须已持有 ffmpeg 并发闸门）"""
     task = TASKS.get(task_id)
     # 排队期间可能已被手动取消，拿到闸门后检查，取消则直接放弃
@@ -521,8 +536,10 @@ def _run_ffmpeg_locked(args, task_id, workdir):
         if duration > 0:
             try:
                 ms = int(progress.get("out_time_ms", 0) or 0)
-                pct = min(100, (ms / 1_000_000) / duration * 100)
-                task["progress"] = round(pct, 1)
+                seg_pct = min(100, (ms / 1_000_000) / duration * 100)
+                # 多段串行时按段数均摊到整体 0~100%
+                overall = (seg_index + seg_pct / 100) / seg_total * 100
+                task["progress"] = round(overall, 1)
             except Exception:
                 pass
         else:
@@ -536,6 +553,9 @@ def _run_ffmpeg_locked(args, task_id, workdir):
         # 压缩任务：完成后探测输出文件，记录对比信息（源 vs 输出）
         if task.get("kind") == "compress" and task.get("output_name"):
             _record_compress_result(task, Path(workdir) / task["output_name"])
+        # 拆分任务：完成后探测输出文件，记录基本信息
+        elif task.get("kind") == "split":
+            _record_split_result(task, workdir)
     else:
         task["status"] = "failed"
         task["error"] = "\n".join(out_lines[-30:])[:2000]
@@ -563,6 +583,38 @@ def _record_compress_result(task: dict, out_path) -> None:
         task["saving"] = saving
     except Exception as e:
         print(f"[compress] 记录对比信息失败: {e}", flush=True)
+
+
+def _record_split_result(task: dict, workdir) -> None:
+    """拆分任务完成后，探测输出文件并记录基本信息（大小/编码/分辨率/时长/片段数）。"""
+    try:
+        work = Path(workdir)
+        files = []
+        if task.get("output_name"):
+            p = work / task["output_name"]
+            if p.exists():
+                files = [p]
+        elif task.get("output_dir"):
+            d = Path(task["output_dir"])
+            if d.is_dir():
+                files = sorted(
+                    [f for f in d.iterdir() if f.is_file() and f.suffix.lower() in (".mp4", ".mov", ".mkv", ".webm", ".avi")],
+                    key=lambda x: x.name,
+                )
+        if not files:
+            return
+        # 多文件：记录总大小 + 第一个文件作为代表信息；单文件：直接用
+        total_size = sum(f.stat().st_size for f in files)
+        rep = get_media_meta(str(files[0]))
+        dur = float(rep.get("duration") or 0)
+        task["out_size"] = total_size
+        task["out_size_human"] = human_size(total_size)
+        task["out_codec"] = rep.get("video_codec", "")
+        task["out_resolution"] = f'{rep.get("width")}x{rep.get("height")}' if rep.get("width") else ""
+        task["out_duration"] = dur
+        task["out_count"] = len(files)
+    except Exception as e:
+        print(f"[split] 记录结果信息失败: {e}", flush=True)
 
 
 def _generate_gif_clips(src, segments, fps, width, base, task_id, duration):
@@ -739,11 +791,17 @@ def api_frame(file_id):
     abort(404)
 
 
-def start_task(task_id, args, duration, workdir):
+def start_task(task_id, args, duration, workdir, args_list=None):
     import threading
-    t = threading.Thread(
-        target=run_ffmpeg, args=(args, task_id, workdir), daemon=True
-    )
+    if args_list:
+        # 多命令串行（如多片段截取），每条单独受闸门限流、进度按段均摊
+        t = threading.Thread(
+            target=run_ffmpeg_list, args=(args_list, task_id, workdir), daemon=True
+        )
+    else:
+        t = threading.Thread(
+            target=run_ffmpeg, args=(args, task_id, workdir), daemon=True
+        )
     register_task_thread(task_id, t)
     t.start()
 
@@ -888,6 +946,40 @@ def fmt_dur(s):
     return f"{h:02d}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
 
 
+def _split_encode_args(encode: str, mute: bool, suffix: str = ".mp4") -> list:
+    """根据编码方式返回拆分片段的编码参数（不含输出文件名）。
+
+    - copy    ：流拷贝，保留原编码/分辨率/体积，速度最快、零画质损失；
+                但片段起点若落在 GOP 中间，浏览器 <video> 严格解码可能前几秒黑屏。
+    - reencode：重编码为 H.264，强制首帧即关键帧（gop=1 段首），彻底消除黑屏，
+                且用 hvc1 tag + faststart，Chrome/Firefox/Safari/Edge/QuickTime 全兼容。
+                代价：重编码耗时略长、体积略增。
+    """
+    if encode == "copy":
+        args = ["-c", "copy"]
+    else:
+        # 重编码：H.264 + CRF 18（近无损，清晰度高）+ 强制首帧 IDR 关键帧
+        args = [
+            "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+            # 段首强制插关键帧，避免任何黑屏；g 设较大避免全程密集关键帧
+            "-x264-params", "keyint=2:min-keyint=2",
+        ]
+        # 容器为 mp4 时强制 hvc1 风格兼容 tag（对 H.264 用 avc1 —— 实际上 libx264
+        # 默认已是 avc1，这里 faststart 由调用方追加），mov/mp4 都走 faststart
+        if suffix.lower() in (".mp4", ".mov", ".m4v"):
+            args += ["-tag:v", "avc1"]
+    if mute:
+        args += ["-an"]
+    else:
+        # 不静音：重编码音频为 AAC 128k（copy 模式则尝试直接拷贝音轨）
+        if encode == "copy":
+            args += ["-c:a", "copy"]
+        else:
+            args += ["-c:a", "aac", "-b:a", "128k"]
+    args += ["-movflags", "+faststart"]
+    return args
+
+
 # 各功能接口 -------------------------------------------------
 
 @app.route("/api/split", methods=["POST"])
@@ -899,6 +991,13 @@ def api_split():
         return jsonify({"error": "源文件不存在"}), 404
     mode = data.get("mode", "segment")  # segment | time
     mute = bool(data.get("mute", False))
+    # 编码方式：copy 保留原编码（极快、无画质损失，但片段起点若落在 GOP 中间，
+    # 浏览器 <video> 严格解码可能前几秒黑屏）；reencode 重编码为 H.264 并强制
+    # 首帧即关键帧，彻底避免黑屏，兼容性最好（Chrome/Firefox/Safari/Edge/QuickTime）。
+    # 默认 reencode：优先保证播放兼容。
+    encode = (data.get("encode") or "reencode").lower()
+    if encode not in ("copy", "reencode"):
+        encode = "reencode"
     meta = get_media_meta(str(src))
     out_paths = []
     args_list = []
@@ -910,13 +1009,23 @@ def api_split():
         base = OUTPUT_DIR / f"split_{src.stem}"
         base.mkdir(exist_ok=True)
         args = ["-i", str(src), "-f", "segment",
-                "-segment_time", str(seg), "-reset_timestamps", "1",
-                "-c", "copy"]
-        if mute:
-            args += ["-an"]
+                "-segment_time", str(seg), "-reset_timestamps", "1"]
+        if encode == "copy":
+            args += ["-c", "copy"]
+            if mute:
+                args += ["-an"]
+        else:
+            # 重编码按关键帧对齐切分，同样无黑屏、兼容性最佳
+            args += ["-c:v", "libx264", "-crf", "18", "-preset", "medium",
+                     "-x264-params", "keyint=2:min-keyint=2"]
+            if mute:
+                args += ["-an"]
+            else:
+                args += ["-c:a", "aac", "-b:a", "128k"]
         args += [str(base / f"{src.stem}_%03d{src.suffix}")]
         task_id = new_task(f"按时长拆分 {src.name} ({seg}s){' · 静音' if mute else ''}",
-                           duration=meta.get("duration", 0))
+                           duration=meta.get("duration", 0),
+                           extra={"kind": "split", "src_name": src.name, "split_mode": "segment", "segment": seg, "mute": mute, "encode": encode})
         TASKS[task_id]["output_dir"] = str(base)
         save_tasks()
         start_task(task_id, args, meta.get("duration", 0), OUTPUT_DIR)
@@ -960,15 +1069,15 @@ def api_split():
         if count == 1:
             start, end = clean[0]
             out = OUTPUT_DIR / f"clip_{src.stem}_{int(time.time())}{src.suffix}"
-            args = ["-i", str(src), "-ss", fmt_dur(start)]
+            args = ["-ss", fmt_dur(start), "-i", str(src)]
             if end is not None:
-                args += ["-to", fmt_dur(end)]
-            args += ["-c", "copy"]
-            if mute:
-                args += ["-an"]
+                # 用 -t（时长）而非 -to（停止时间），避免 seeking 模式下 -to 语义歧义
+                args += ["-t", fmt_dur(end - start)]
+            args += _split_encode_args(encode, mute, src.suffix)
             args += [str(out)]
             task_id = new_task(f"截取片段 {src.name} [{fmt_dur(start)}~{fmt_dur(end) if end is not None else '结尾'}]{' · 静音' if mute else ''}",
-                               duration=duration)
+                               duration=duration,
+                               extra={"kind": "split", "src_name": src.name, "split_mode": "time", "mute": mute, "encode": encode, "segments": [{"start": start, "end": end}]})
             TASKS[task_id]["output_name"] = out.name
             save_tasks()
             start_task(task_id, args, duration, OUTPUT_DIR)
@@ -976,20 +1085,22 @@ def api_split():
         else:
             base = OUTPUT_DIR / f"clips_{src.stem}_{int(time.time())}"
             base.mkdir(exist_ok=True)
-            args = ["-i", str(src)]
+            # 关键帧对齐：每个片段用独立 ffmpeg 调用，input seeking（-ss 在
+            # -i 前）+ -c copy 从最近关键帧起切，避免前几秒黑屏。
+            args_list = []
             for i, (start, end) in enumerate(clean):
-                args += ["-ss", fmt_dur(start)]
+                seg_args = ["-ss", fmt_dur(start), "-i", str(src)]
                 if end is not None:
-                    args += ["-to", fmt_dur(end)]
-                if mute:
-                    args += ["-map", "0:v", "-c", "copy"]
-                else:
-                    args += ["-map", "0", "-c", "copy"]
-                args += [str(base / f"clip_{i+1:03d}{src.suffix}")]
-            task_id = new_task(f"截取 {count} 个片段 {src.name}{' · 静音' if mute else ''}", duration=duration)
+                    # 用 -t（时长）而非 -to（停止时间），避免 seeking 模式下 -to 语义歧义
+                    seg_args += ["-t", fmt_dur(end - start)]
+                seg_args += _split_encode_args(encode, mute, src.suffix)
+                seg_args += [str(base / f"clip_{i+1:003d}{src.suffix}")]
+                args_list.append(seg_args)
+            task_id = new_task(f"截取 {count} 个片段 {src.name}{' · 静音' if mute else ''}", duration=duration,
+                               extra={"kind": "split", "src_name": src.name, "split_mode": "time", "mute": mute, "encode": encode, "count": count, "segments": [{"start": s, "end": e} for s, e in clean]})
             TASKS[task_id]["output_dir"] = str(base)
             save_tasks()
-            start_task(task_id, args, duration, OUTPUT_DIR)
+            start_task(task_id, None, duration, OUTPUT_DIR, args_list=args_list)
             return jsonify({"task_id": task_id})
 
 
