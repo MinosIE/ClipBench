@@ -701,11 +701,19 @@ def api_upload():
     })
 
 
+# 图片/动图扩展名：FFprobe 会把这些误判为含 video stream（has_video=True），
+# 但它们不是可处理的视频媒体，不应出现在左侧「媒体文件」列表里
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp", ".tif", ".tiff", ".svg"}
+
+
 def _is_ignored_file(name: str) -> bool:
-    """跳过版本控制占位文件和隐藏文件"""
-    if name.startswith("."):
+    """跳过版本控制占位文件、隐藏文件和图片/动图（非视频媒体）"""
+    low = name.lower()
+    if low.startswith("."):
         return True
-    if name.lower() in {".gitkeep", ".gitignore", ".ds_store"}:
+    if low in {".gitkeep", ".gitignore", ".ds_store"}:
+        return True
+    if Path(low).suffix in IMAGE_EXTS:
         return True
     return False
 
@@ -752,6 +760,8 @@ def api_files():
             meta = {}
         if not meta.get("has_video"):
             continue  # 只展示视频类媒体，音频（含音频提取产物）不进列表
+        if Path(p.name.lower()).suffix in IMAGE_EXTS:
+            continue  # 双层兜底：图片/动图（FFprobe 误判 has_video=True）不进列表
         files.append({
             "file_id": p.name,
             "filename": p.name,

@@ -9,7 +9,20 @@ const FORMATS = [
   { v: "flac", label: "FLAC" },
 ] as const;
 
+const FORMAT_DESC: Record<string, string> = {
+  mp3: "兼容性最佳，通用首选，有损压缩。",
+  m4a: "同码率体积更小，苹果设备友好，有损。",
+  wav: "无损原始波形，体积最大，适合二次编辑。",
+  flac: "无损压缩，体积小于 WAV，适合存档。",
+};
+
 const BITRATES = ["128k", "192k", "320k"];
+
+const BITRATE_DESC: Record<string, string> = {
+  "128k": "体积小，适合语音/播客，音质一般。",
+  "192k": "体积与音质平衡，通用推荐。",
+  "320k": "最高码率，接近无损听感，体积偏大。",
+};
 
 export default function AudioExtractPanel() {
   const [format, setFormat] = createSignal<string>("mp3");
@@ -66,9 +79,10 @@ export default function AudioExtractPanel() {
             </For>
           </div>
         </div>
+        <p class="seg-hint col-span">{FORMAT_DESC[format()]}</p>
 
         <Show when={!lossless()}>
-          <div class="field col-span">
+          <div class="field row col-span">
             <label>码率</label>
             <div class="seg">
               <For each={BITRATES}>
@@ -83,6 +97,7 @@ export default function AudioExtractPanel() {
               </For>
             </div>
           </div>
+          <p class="seg-hint col-span">{BITRATE_DESC[bitrate()]}</p>
         </Show>
 
         <Show when={lossless()}>

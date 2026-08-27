@@ -883,22 +883,44 @@ button {
   font-weight: 600;
   color: var(--muted);
 }
-/* 左右布局变体：label 在左、控件在右，适合拆分面板这类字段较少的场景 */
+/* 左右布局变体：label 与控件同行，label 固定列宽左对齐，
+   控件保持自然宽度（不拉伸），空间利用率高 */
 .field.row {
   flex-direction: row;
   align-items: center;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   min-width: 0;
 }
 .field.row > label {
-  flex: 0 0 92px;
+  flex: 0 0 auto;
+  width: auto;
   text-align: right;
+  white-space: nowrap;
   margin: 0;
+  color: var(--muted);
 }
 .field.row > input[type="number"],
-.field.row > input[type="text"] {
-  max-width: 200px;
+.field.row > input[type="text"],
+.field.row > select {
+  flex: 0 1 auto;
+  width: auto;
+}
+/* seg 在同行内保持自然内联宽度，按钮不被拉伸、整体不换行 */
+.field.row > .seg {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  width: auto;
+}
+/* seg 选中项的行内说明：左缩进对齐控件左缘，浅色小字 */
+.seg-hint {
+  margin: -6px 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.seg-hint.col-span {
+  grid-column: 1 / -1;
 }
 input[type="text"],
 input[type="number"],
