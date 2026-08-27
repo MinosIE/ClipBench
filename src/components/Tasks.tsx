@@ -1,4 +1,4 @@
-import { For, Show, createSignal, createEffect } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 import {
   tasks,
   patchTask,
@@ -10,11 +10,22 @@ import {
   cancelTask,
   deleteTask,
   deleteAllTasks,
-  outputUrl,
   downloadDirUrl,
   downloadFileUrl,
 } from "../api";
 import { refreshFiles } from "./Sidebar";
+import { addOutput, isOutputAdded } from "../addedOutputs";
+
+/** 产物为视频（可添加到左侧媒体列表继续二次处理）的扩展名集合 */
+const VIDEO_EXTS = new Set([
+  ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v",
+  ".ts", ".flv", ".wmv", ".m2ts", ".3gp",
+]);
+
+function outputExt(name: string): string {
+  const m = name.toLowerCase().match(/\.(\w+)$/);
+  return m ? "." + m[1] : "";
+}
 
 const statusText: Record<string, string> = {
   queued: "排队中",
@@ -39,19 +50,6 @@ export default function Tasks() {
   const [selected, setSelected] = createSignal<Set<string>>(new Set());
   const [collapsed, setCollapsed] = createSignal(false);
   const [logModal, setLogModal] = createSignal<{ name: string; content: string } | null>(null);
-
-  // 任务完成且产生输出文件时，自动刷新左侧文件列表（产物回流）
-  let lastDone = "";
-  createEffect(() => {
-    const done = tasks
-      .filter((t) => t.status === "finished" && t.output_name)
-      .map((t) => `${t.task_id}:${t.output_name}`)
-      .join("|");
-    if (done && done !== lastDone) {
-      lastDone = done;
-      refreshFiles();
-    }
-  });
 
   const copyLog = async () => {
     const m = logModal();
@@ -87,6 +85,19 @@ export default function Tasks() {
       pushToast(`取消失败：${(e as Error).message}`, "error");
     }
   };
+
+  /** 将单文件视频产物添加到左侧媒体文件列表（可二次处理） */
+  const addToFiles = async (name: string) => {
+    addOutput(name);
+    await refreshFiles();
+    pushToast(`已添加 ${name} 到媒体文件`, "success");
+  };
+
+  const isVideoOutput = (t: { status?: string; output_name?: string | null; output_dir?: string | null }) =>
+    t.status === "finished" &&
+    !!t.output_name &&
+    !t.output_dir &&
+    VIDEO_EXTS.has(outputExt(t.output_name));
 
   const onDelete = async (id: string) => {
     await deleteTask(id);
@@ -273,10 +284,10 @@ export default function Tasks() {
                     </div>
                   </Show>
 
-                  {/* 拆分任务完成后的输出基本信息（横排紧凑 chips） */}
+                  {/* 任务完成后的输出基本信息（横排紧凑 chips）；压缩任务走上方对比区 */}
                   <Show
                     when={
-                      t.kind === "split" &&
+                      t.kind !== "compress" &&
                       t.status === "finished" &&
                       t.out_size
                     }
@@ -284,7 +295,7 @@ export default function Tasks() {
                     <div class="cc-params">
                       <span>输出 {t.out_size_human || "—"}</span>
                       <Show when={t.out_count && t.out_count > 1}>
-                        <span>{t.out_count} 个片段</span>
+                        <span>{t.out_count} 个文件</span>
                       </Show>
                       <Show when={t.encode}>
                         <span class="cc-tag">
@@ -301,7 +312,7 @@ export default function Tasks() {
                       <Show when={t.out_resolution}>
                         <span>{t.out_resolution}</span>
                       </Show>
-                      <Show when={t.out_duration != null}>
+                      <Show when={t.out_duration != null && t.out_duration > 0}>
                         <span>
                           时长 {fmtDur(t.out_duration)}
                           {t.out_count && t.out_count > 1 ? " (首段)" : ""}
@@ -385,13 +396,10 @@ export default function Tasks() {
                       }
                     >
                       <div class="task-result">
-                        {/* 单文件结果：查看 + 下载 */}
+                        {/* 单文件结果：下载 */}
                         <Show
                           when={t.output_name && !t.output_dir}
                         >
-                          <a href={outputUrl(t.output_name!)} target="_blank">
-                            查看单个结果
-                          </a>
                           <a href={downloadFileUrl(t.output_name!)}>
                             下载结果
                           </a>
@@ -424,6 +432,21 @@ export default function Tasks() {
                           }
                         >
                           日志
+                        </button>
+                      </Show>
+                      {/* 已完成且产物为视频：可添加到左侧媒体文件继续处理 */}
+                      <Show when={isVideoOutput(t)}>
+                        <button
+                          class="btn secondary small"
+                          disabled={isOutputAdded(t.output_name!)}
+                          title={
+                            isOutputAdded(t.output_name!)
+                              ? "已添加到媒体文件"
+                              : "添加到左侧媒体文件列表"
+                          }
+                          onClick={() => addToFiles(t.output_name!)}
+                        >
+                          {isOutputAdded(t.output_name!) ? "已添加" : "添加"}
                         </button>
                       </Show>
                       <button

@@ -309,7 +309,7 @@ button {
   color: var(--text);
 }
 .file-search {
-  padding: 0 10px 8px;
+  padding: 10px 8px;
 }
 .file-search input {
   width: 100%;
@@ -458,6 +458,44 @@ button {
   color: var(--muted);
   text-align: center;
   padding: 22px;
+}
+
+/* 输出文件名模板设置（侧栏底部） */
+.tpl-setting {
+  padding: 10px 12px 14px;
+  border-top: 1px solid var(--border);
+}
+.tpl-setting.collapsed {
+  display: none;
+}
+.tpl-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.tpl-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.tpl-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.tpl-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+  word-break: break-all;
 }
 
 /* 压缩任务：源 vs 输出对比条（独占整行，撑满任务卡片宽度） */

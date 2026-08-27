@@ -13,8 +13,13 @@ import {
   confirmModal,
   pushToast,
   setActiveTab,
-  showOutputs,
 } from "../store";
+import {
+  filenameTemplate,
+  persistFilenameTemplate,
+  TEMPLATE_HINT,
+} from "../filenameTemplate";
+import { isOutputAdded, removeOutput } from "../addedOutputs";
 import {
   uploadFile,
   deleteFile,
@@ -27,9 +32,13 @@ import {
 
 export async function refreshFiles() {
   try {
-    const data = await listFiles({ includeOutputs: showOutputs() });
-    setFiles(data);
-    if (selectedId() && !data.find((f) => f.name === selectedId())) {
+    const data = await listFiles({ includeOutputs: true });
+    // 上传文件全保留；产物仅显示手动「添加」过的
+    const filtered = data.filter(
+      (f) => f.location === "uploads" || isOutputAdded(f.name)
+    );
+    setFiles(filtered);
+    if (selectedId() && !filtered.find((f) => f.name === selectedId())) {
       setSelectedId(null);
     }
   } catch (e) {
@@ -72,7 +81,9 @@ export default function Sidebar() {
   };
 
   const removeOne = async (name: string) => {
+    const f = files.find((x) => x.name === name);
     await deleteFile(name);
+    if (f?.location === "outputs") removeOutput(name);
     if (selectedId() === name) setSelectedId(null);
     await refreshFiles();
     pushToast("已删除 " + name, "info");
@@ -284,6 +295,21 @@ export default function Sidebar() {
           style={{ display: "none" }}
           onChange={(e) => onUpload(e.currentTarget.files)}
         />
+      </div>
+
+      {/* 输出文件名模板设置 */}
+      <div class="tpl-setting" classList={{ collapsed: collapsed() }}>
+        <Show when={!collapsed()}>
+          <label class="tpl-label">输出文件名模板</label>
+          <input
+            type="text"
+            class="tpl-input"
+            placeholder="留空=默认「{name}_{ts}{ext}」"
+            value={filenameTemplate()}
+            onInput={(e) => persistFilenameTemplate(e.currentTarget.value.trim())}
+          />
+          <div class="tpl-hint">{TEMPLATE_HINT}</div>
+        </Show>
       </div>
     </aside>
   );

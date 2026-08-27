@@ -556,11 +556,9 @@ def _run_ffmpeg_locked(args, task_id, workdir, seg_index=0, seg_total=1):
         # 压缩任务：完成后探测输出文件，记录对比信息（源 vs 输出）
         if task.get("kind") == "compress" and task.get("output_name"):
             _record_compress_result(task, Path(workdir) / task["output_name"])
-        # 拆分任务：完成后探测输出文件，记录基本信息
-        elif task.get("kind") == "split":
-            _record_split_result(task, workdir)
-        # 合并任务：完成后探测输出文件，记录基本信息（大小/编码/分辨率/时长）
-        elif task.get("kind") == "merge" and task.get("output_name"):
+        # 其余任务（拆分/合并/转换/旋转/水印/变速/裁剪/截图/去字幕等）：
+        # 统一探测输出并记录大小/编码/分辨率/时长
+        else:
             _record_split_result(task, workdir)
     else:
         task["status"] = "failed"
@@ -605,8 +603,13 @@ def _record_split_result(task: dict, workdir) -> None:
         elif task.get("output_dir"):
             d = Path(task["output_dir"])
             if d.is_dir():
+                # 兼容图片/音频/GIF 等多文件产物；排除缩略图、合并清单、调色板临时文件
                 files = sorted(
-                    [f for f in d.iterdir() if f.is_file() and f.suffix.lower() in (".mp4", ".mov", ".mkv", ".webm", ".avi")],
+                    [f for f in d.iterdir()
+                     if f.is_file()
+                     and not f.name.startswith("thumb_")
+                     and not f.name.startswith("merge_list_")
+                     and not f.name.startswith("pal_")],
                     key=lambda x: x.name,
                 )
         if not files:
@@ -623,6 +626,18 @@ def _record_split_result(task: dict, workdir) -> None:
         task["out_count"] = len(files)
     except Exception as e:
         print(f"[split] 记录结果信息失败: {e}", flush=True)
+
+
+def backfill_task_sizes():
+    """历史已完成任务可能缺输出大小（旧版本只对部分任务记录），启动时回填。"""
+    changed = False
+    for t in TASKS.values():
+        if t.get("status") == "finished" and not t.get("out_size"):
+            if t.get("output_name") or t.get("output_dir"):
+                _record_split_result(t, OUTPUT_DIR)
+                changed = True
+    if changed:
+        save_tasks()
 
 
 def _generate_gif_clips(src, segments, fps, width, base, task_id, duration):
@@ -654,6 +669,7 @@ def _generate_gif_clips(src, segments, fps, width, base, task_id, duration):
         if task:
             task["status"] = "finished"
             task["progress"] = 100
+            _record_split_result(task, base)
             save_tasks()
     except Exception as e:
         if task:
@@ -704,6 +720,45 @@ def api_upload():
 # 图片/动图扩展名：FFprobe 会把这些误判为含 video stream（has_video=True），
 # 但它们不是可处理的视频媒体，不应出现在左侧「媒体文件」列表里
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp", ".tif", ".tiff", ".svg"}
+
+# ---- 输出文件名模板 ----
+# 占位符：{name} 源文件名(去扩展名) / {ext} 扩展名(含点) / {ts} 时间戳 /
+#          {date} 日期(YYYYMMDD) / {time} 时分秒(HHMMSS)
+# 默认模板贴近旧行为「原名_时间戳.扩展名」；非法模板安全回退到默认。
+def _sanitize_template(tpl: str) -> str:
+    """去掉路径分隔符与不可见字符，避免模板写出目录之外"""
+    if not tpl or not isinstance(tpl, str):
+        return ""
+    tpl = tpl.replace("/", "_").replace("\\", "_").replace("\x00", "")
+    return tpl.strip() or ""
+
+
+def _build_output_name(template: str, src: Path, ext: str) -> str:
+    """按模板生成输出文件名（不含目录）。ext 应为带点的扩展名，如 '.mp4'。"""
+    tpl = _sanitize_template(template)
+    if not tpl:
+        tpl = "{name}_{ts}{ext}"
+    ts = int(time.time())
+    when = time.localtime()
+    date = time.strftime("%Y%m%d", when)
+    clock = time.strftime("%H%M%S", when)
+    out = (
+        tpl.replace("{name}", src.stem)
+        .replace("{ext}", ext)
+        .replace("{ts}", str(ts))
+        .replace("{date}", date)
+        .replace("{time}", clock)
+    )
+    # 防止模板完全吃掉扩展名导致无后缀；至少补回 ext
+    if not Path(out).suffix:
+        out += ext
+    # 安全清洗：仅禁止路径穿越与不可见字符，保留中文等合法字符
+    # （不使用 secure_filename，否则会清掉用户在模板里写的中文描述）
+    out = out.replace("/", "_").replace("\\", "_").replace("\x00", "")
+    out = out.strip().strip(".")
+    if not out or out in (".", ".."):
+        out = f"{src.stem}{ext}"
+    return out
 
 
 def _is_ignored_file(name: str) -> bool:
@@ -925,6 +980,7 @@ def _run_inpaint_impl(src, out, x, y, w, h, radius, task_id, func=None, use_flow
     else:
         TASKS[task_id]["status"] = "finished"
         TASKS[task_id]["progress"] = 100
+        _record_split_result(TASKS[task_id], OUTPUT_DIR)
     TASKS[task_id]["elapsed"] = int(time.time() - (TASKS[task_id].get("created_at") or time.time()))
     save_tasks()
 
@@ -1120,7 +1176,7 @@ def api_split():
         count = len(clean)
         if count == 1:
             start, end = clean[0]
-            out = OUTPUT_DIR / f"clip_{src.stem}_{int(time.time())}{src.suffix}"
+            out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, src.suffix)
             args = ["-ss", fmt_dur(start), "-i", str(src)]
             if end is not None:
                 # 用 -t（时长）而非 -to（停止时间），避免 seeking 模式下 -to 语义歧义
@@ -1177,7 +1233,7 @@ def api_screenshot():
         enc_args = ["-c:v", "libaom-av1", "-still-picture", "1"]
     if mode == "single":
         time_pos = data.get("time", "00:00:01")
-        out = OUTPUT_DIR / f"shot_{src.stem}_{int(time.time())}.{ext}"
+        out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, f".{ext}")
         args = ["-i", str(src), "-ss", str(time_pos), "-vframes", "1"]
         vf = data.get("vf")
         if vf:
@@ -1214,7 +1270,7 @@ def api_convert():
         return jsonify({"error": "源文件不存在"}), 404
     target = data.get("target", "mp4")
     meta = get_media_meta(str(src))
-    out = OUTPUT_DIR / f"conv_{src.stem}_{int(time.time())}.{target}"
+    out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, f".{target}")
     faststart = bool(data.get("faststart", False))
     crf = data.get("crf")
     # 需要强制重编码的容器/格式
@@ -1427,7 +1483,7 @@ def api_compress():
         use_crf = crf
         codec_label = "H.264"
         force_tag = False
-    out = OUTPUT_DIR / f"comp_{src.stem}_{int(time.time())}.mp4"
+    out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, ".mp4")
     args = ["-i", str(src), "-c:v", enc, "-preset", preset,
             "-crf", str(use_crf)]
     if force_tag:
@@ -1498,7 +1554,7 @@ def api_crop():
     w = data.get("w") or meta.get("width")
     h = data.get("h") or meta.get("height")
     faststart = bool(data.get("faststart", False))
-    out = OUTPUT_DIR / f"crop_{src.stem}_{int(time.time())}{src.suffix}"
+    out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, src.suffix)
     vf = f"crop={w}:{h}:{x}:{y}"
     args = ["-i", str(src), "-vf", vf, "-c:a", "copy"]
     args = _finalize(args, out, faststart)
@@ -1574,7 +1630,7 @@ def api_merge():
         "\n".join(f"file '{p.resolve()}'" for p in paths), encoding="utf-8"
     )
     suffix = Path(file_ids[0]).suffix or ".mp4"
-    out = OUTPUT_DIR / f"merge_{int(time.time())}{suffix}"
+    out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), paths[0], suffix)
     if encode == "copy":
         args = ["-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy"]
     else:
@@ -1625,7 +1681,7 @@ def api_rotate():
         vf_parts.append("vflip")
     if not vf_parts:
         return jsonify({"error": "请选择旋转或翻转操作"}), 400
-    out = OUTPUT_DIR / f"rot_{src.stem}_{int(time.time())}{src.suffix}"
+    out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, src.suffix)
     vf = ",".join(vf_parts)
     args = ["-i", str(src), "-vf", vf, "-c:a", "copy"]
     args = _finalize(args, out, faststart)
@@ -1658,7 +1714,7 @@ def api_watermark():
         "br": f"W-w-{margin}:H-h-{margin}",
         "c": "(W-w)/2:(H-h)/2",
     }
-    out = OUTPUT_DIR / f"wm_{src.stem}_{int(time.time())}{src.suffix}"
+    out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, src.suffix)
     if wm_type == "text":
         text = data.get("text", "Watermark")
         fontsize = int(data.get("fontsize", 36))
@@ -1743,7 +1799,7 @@ def api_speed():
         return jsonify({"error": "速度需大于 0"}), 400
     reverse = bool(data.get("reverse", False))
     faststart = bool(data.get("faststart", False))
-    out = OUTPUT_DIR / f"speed_{src.stem}_{int(time.time())}{src.suffix}"
+    out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, src.suffix)
     # setpts 控制视频速度，atempo 控制音频速度（最大2x，可链式）
     pts = 1.0 / speed
     vf = f"setpts={pts:.4f}*PTS"
@@ -1794,7 +1850,7 @@ def api_extract_audio():
     fmt = data.get("format", "mp3")
     if fmt not in ("mp3", "wav", "flac", "m4a"):
         fmt = "mp3"
-    out = OUTPUT_DIR / f"audio_{src.stem}_{int(time.time())}.{fmt}"
+    out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, f".{fmt}")
     if fmt == "mp3":
         codec = ["-c:a", "libmp3lame", "-b:a", data.get("bitrate") or "192k"]
     elif fmt == "m4a":
@@ -1844,7 +1900,7 @@ def api_desubtitle():
         quality = data.get("quality", "standard")
         if quality not in ("standard", "high"):
             quality = "standard"
-        out = OUTPUT_DIR / f"desub_{src.stem}_{int(time.time())}{src.suffix}"
+        out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, src.suffix)
         qlabel = "智能修复" if quality == "standard" else "智能修复(高质量)"
         task_id = new_task(f"去字幕({qlabel}) {w}x{h}@{x},{y}",
                            duration=meta.get("duration", 0),
@@ -1880,7 +1936,7 @@ def api_desubtitle():
         dw = max(4, dw); dh = max(4, dh)
         vf = f"delogo=x={dx}:y={dy}:w={dw}:h={dh}"
         tag = f"边缘修复{pad}"
-        out = OUTPUT_DIR / f"desub_{src.stem}_{int(time.time())}{src.suffix}"
+        out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, src.suffix)
         args = ["-i", str(src), "-vf", vf, "-c:a", "copy", str(out)]
         task_id = new_task(f"去字幕({tag}) {w}x{h}@{x},{y}",
                            duration=meta.get("duration", 0))
@@ -1890,7 +1946,7 @@ def api_desubtitle():
         return jsonify({"task_id": task_id})
 
     vf = f"[0:v]split=2[full][r];[r]{region}[proc];[full][proc]overlay={x}:{y}"
-    out = OUTPUT_DIR / f"desub_{src.stem}_{int(time.time())}{src.suffix}"
+    out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, src.suffix)
     args = ["-i", str(src), "-vf", vf, "-c:a", "copy", str(out)]
     task_id = new_task(f"去字幕({tag}) {w}x{h}@{x},{y}",
                        duration=meta.get("duration", 0))
@@ -2137,6 +2193,11 @@ def serve_upload(filename: str):
 def serve_output(filename: str):
     safe = os.path.basename(filename)
     return send_from_directory(str(OUTPUT_DIR), safe, as_attachment=False)
+
+
+# 历史已完成任务回填输出大小（需在全部函数定义之后执行）
+if not os.environ.get("CLIPBENCH_TEST"):
+    backfill_task_sizes()
 
 
 if __name__ == "__main__":

@@ -32,6 +32,16 @@ async function jsonFetch(url: string, init?: RequestInit) {
   return res.json();
 }
 
+// 全局输出文件名模板（独立模块，避免与 store 循环依赖）
+import { filenameTemplate } from "./filenameTemplate";
+
+/** 给任务创建请求体注入 filename_template（模板为空时后端用默认） */
+function withTemplate(payload: Record<string, any>): Record<string, any> {
+  const tpl = filenameTemplate();
+  if (tpl) return { ...payload, filename_template: tpl };
+  return payload;
+}
+
 /** 复制模式（保留原编码）下，选中文件参数是否一致。返回 null 表示 OK，否则返回中文错误。 */
 export function checkMergeCompatible(files: StoredFile[]): string | null {
   if (files.length < 2) return null;
@@ -263,7 +273,7 @@ export async function startDesubtitle(
   return jsonFetch("/api/desubtitle", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(withTemplate(payload)),
   });
 }
 
@@ -284,7 +294,7 @@ export async function splitVideo(params: {
   return jsonFetch("/api/split", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(withTemplate(params)),
   });
 }
 
@@ -299,7 +309,7 @@ export async function screenshotVideo(params: {
   return jsonFetch("/api/screenshot", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(withTemplate(params)),
   });
 }
 
@@ -314,7 +324,7 @@ export async function convertVideo(params: {
   return jsonFetch("/api/convert", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(withTemplate(params)),
   });
 }
 
@@ -330,7 +340,7 @@ export async function compressVideo(params: {
   return jsonFetch("/api/compress", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(withTemplate(params)),
   });
 }
 
@@ -379,7 +389,7 @@ export async function cropVideo(params: {
   return jsonFetch("/api/crop", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(withTemplate(params)),
   });
 }
 
@@ -390,7 +400,7 @@ export async function mergeVideos(file_ids: string[], faststart?: boolean, encod
   return jsonFetch("/api/merge", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file_ids, faststart: !!faststart, encode: encode ?? "reencode" }),
+    body: JSON.stringify(withTemplate({ file_ids, faststart: !!faststart, encode: encode ?? "reencode" })),
   });
 }
 
@@ -405,7 +415,7 @@ export async function rotateVideo(params: {
   return jsonFetch("/api/rotate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(withTemplate(params)),
   });
 }
 
@@ -435,7 +445,7 @@ export async function watermarkVideo(params: {
   return jsonFetch("/api/watermark", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(withTemplate(params)),
   });
 }
 
@@ -449,7 +459,7 @@ export async function speedVideo(params: {
   return jsonFetch("/api/speed", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(withTemplate(params)),
   });
 }
 
@@ -462,7 +472,7 @@ export async function extractAudio(params: {
   return jsonFetch("/api/extract_audio", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(withTemplate(params)),
   });
 }
 
