@@ -1,5 +1,7 @@
 # ClipBench
 
+[English](README_EN.md) | 简体中文
+
 ![License: MIT](https://img.shields.io/badge/license-MIT-green.svg) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-orange) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
 
 本地视频处理工具箱 —— 基于 Flask + ffmpeg 的后端与 SolidJS + Vite 的前端，提供**去字幕、拆分、截图、格式转换、压缩、裁剪、合并、旋转、水印、调速、音频提取** 11 个常用功能。所有处理都在本机完成，不上传任何数据。
@@ -29,6 +31,24 @@
 | 水印 | 文字或图片水印，5 个角位 + 缩放 + 透明度 | 类型：文字 / 图片（支持 PNG 等透明图）；位置：左上/右上/左下/右下/居中；文字字号、颜色、描边；图片缩放比、透明度 |
 | 调速 | 0.5x–4x 变速，支持倒放 | 速度（0.5–4.0，步进 0.1）；倒放开关 |
 | 音频提取 | 提取视频音轨或转码纯音频，导出 mp3 / m4a / wav / flac | 格式；码率（mp3/m4a：128k / 192k / 320k；wav/flac 无损无码率） |
+
+### 输出文件名模板
+
+侧栏底部可设置全局输出文件名模板，所有任务产物命名都会套用。支持占位符：
+
+| 占位符 | 含义 | 示例 |
+| --- | --- | --- |
+| `{name}` | 源文件名（不含扩展名） | `demo` |
+| `{ext}` | 扩展名（含点） | `.mp4` |
+| `{ts}` | Unix 时间戳 | `1787801543` |
+| `{date}` | 日期 | `20260827` |
+| `{time}` | 时分秒 | `113200` |
+
+留空则回退默认模板 `{name}_{ts}{ext}`（如 `demo_1787801543.mp4`）。模板支持中文描述（如 `{name}_去字幕{ext}`），仅禁止路径穿越字符。
+
+### 产物回流到媒体列表
+
+任务完成后产物**不会**自动进入左侧媒体文件列表。在任务列表中，已完成且产物为**单文件视频**的任务会显示「添加」按钮，点击后产物出现在左侧（带「产物」徽标），可直接继续二次处理；点媒体文件卡片上的 ✕ 可删除该产物文件。任务卡片会展示产物大小、编码与分辨率。
 
 ### 右侧媒体信息卡片
 
@@ -81,6 +101,7 @@ python app.py
 | `PORT` | `8080` | 服务监听端口 |
 | `FFMPEG_PATH` | 自动探测 | 指定 ffmpeg 可执行文件路径 |
 | `FFPROBE_PATH` | 自动探测 | 指定 ffprobe 可执行文件路径 |
+| `CLIPBENCH_FFMPEG_SLOTS` | 逻辑核心数的一半（至少 1） | ffmpeg 任务并发数；设为 `1` 即完全串行 |
 
 ---
 
@@ -91,18 +112,19 @@ python app.py
 | GET | `/api/files` | 列出已上传文件及其媒体信息（含编码、分辨率、时长等） |
 | POST | `/api/upload` | 上传媒体文件（表单字段 `file`；单文件上限 4GB） |
 | POST | `/api/delete_uploads` | 按文件名批量删除上传文件（防目录穿越） |
-| POST | `/api/desubtitle` | 去字幕：`{file_id, mode, top, bottom, full_width}` |
-| POST | `/api/split` | 拆分：`{file_id, mode, interval/segments, format, encode}`（`encode`：`reencode` 重编码 H.264 默认 / `copy` 保留原编码） |
-| POST | `/api/screenshot` | 截图：`{file_id, time, interval, format}`（jpg / png / webp / avif） |
-| POST | `/api/convert` | 转码：`{file_id, target_format, reencode, crf, audio, faststart}` |
-| POST | `/api/compress` | 压缩：`{file_id, crf, scale, video_bitrate, audio_bitrate, faststart}`（自动选择 x264/x265） |
-| POST | `/api/crop` | 裁剪：`{file_id, x, y, w, h}` |
-| POST | `/api/merge` | 合并：`{file_ids, encode, faststart}`（≥2 个；`encode`：`h264` 默认 / `hevc` / `copy` 保留原编码） |
-| POST | `/api/rotate` | 旋转/翻转：`{file_id, rotation, flip}` |
-| POST | `/api/watermark` | 水印：`{file_id, type, text/image, position, size, opacity}` |
+| POST | `/api/desubtitle` | 去字幕：`{file_id, mode, x, y, w, h, quality?, radius?, strength?}`（`mode`：`delogo` 边缘修复 / `blur` 模糊 / `mosaic` 马赛克 / `inpaint` 内容感知修复） |
+| POST | `/api/split` | 拆分：`{file_id, mode, segment?, segments?, start?, end?, output?, encode?, mute?, gif_fps?, gif_width?}`（`mode`：`segment` 按时长 / `time` 按片段；`output`：`video` / `gif`；`encode`：`reencode` 重编码 H.264 默认 / `copy` 保留原编码） |
+| POST | `/api/screenshot` | 截图：`{file_id, mode, time?, interval?, format?}`（`mode`：`single` 单张 / `every` 按间隔；`format`：jpg / png / webp / avif） |
+| POST | `/api/convert` | 转码：`{file_id, target, crf?, vcodec?, faststart?}`（`target`：mp4 / mkv / webm / mov / avi / gif 等；gif / webm 或传 `crf` 时强制重编码） |
+| POST | `/api/compress` | 压缩：`{file_id, preset?, crf?, scale?, vcodec?, faststart?}`（自动选择 x264/x265；`preset`：veryslow → veryfast；`scale`：original / 1080 / 720 / 480；`vcodec`：h264 / hevc） |
+| POST | `/api/compress_suggest` | 压缩智能建议：`{file_id, vcodec}` → 推荐 CRF、分辨率与预估体积（前端智能建议的唯一权威来源） |
+| POST | `/api/crop` | 裁剪：`{file_id, x, y, w, h, faststart?}` |
+| POST | `/api/merge` | 合并：`{file_ids, encode?, faststart?}`（≥2 个；`encode`：`h264` 默认 / `hevc` / `copy` 保留原编码，copy 要求各源参数一致） |
+| POST | `/api/rotate` | 旋转/翻转：`{file_id, rotation, flip_h?, flip_v?, faststart?}`（`rotation`：0 / 90 / 180 / 270） |
+| POST | `/api/watermark` | 水印：`{file_id, type, position, text?, fontsize?, color?, alpha?, watermark_id?, scale_w?, margin?, faststart?}`（`type`：text / image；`position`：tl / tr / bl / br / c） |
 | POST | `/api/upload_watermark` | 上传水印图片，返回 `watermark_id` |
-| POST | `/api/speed` | 调速：`{file_id, speed, reverse}` |
-| POST | `/api/extract_audio` | 音频提取：`{file_id, format: mp3/m4a/wav/flac, bitrate?}`（源可来自上传或输出目录） |
+| POST | `/api/speed` | 调速：`{file_id, speed, reverse?, faststart?}`（`speed`：0.5–4.0） |
+| POST | `/api/extract_audio` | 音频提取：`{file_id, format, bitrate?}`（`format`：mp3 / m4a / wav / flac；源可来自上传或输出目录） |
 | GET | `/api/tasks` | 所有任务及状态 |
 | GET | `/api/tasks/stream` | SSE：任务状态实时推送 |
 | GET | `/api/task/<task_id>` | 单个任务详情（未找到返回 404） |
@@ -111,10 +133,13 @@ python app.py
 | POST | `/api/tasks/delete` | 批量删除任务（运行中先取消，需 `task_ids` 列表） |
 | GET | `/api/version` | 服务与 ffmpeg/ffprobe 版本信息 |
 | GET | `/api/download/<file_id>` | 下载输出文件 |
+| GET | `/api/download_dir/<task_id>` | 多文件产物打包下载（zip） |
 | GET | `/media/<path>` | 预览媒体文件 |
 | GET | `/api/file/<file_id>` / `/api/thumbnail/<file_id>` / `/api/frame/<file_id>` | 文件详情 / 首帧缩略图 / 抽帧 |
 
-任务字段：`task_id`、`name`（功能名）、`status`（queued / running / finished / failed / cancelled）、`progress`（0–100）、`duration`、`output_name` / `output_dir`、`error`、`created_at` 等。
+> 所有任务创建接口均支持可选参数 `filename_template`，用于自定义产物文件名（见下方「输出文件名模板」一节）。
+
+任务字段：`task_id`、`name`（功能名）、`kind`（compress / split / merge 等）、`status`（queued / running / finished / failed / cancelled）、`progress`（0–100）、`duration`、`elapsed`、`output_name` / `output_dir`、`out_size` / `out_size_human`（产物大小）、`out_codec` / `out_resolution`、`out_count`、`error`、`log`、`created_at` 等。
 
 ---
 
@@ -130,11 +155,15 @@ clipbench/
 ├── start.sh               # 一键启动脚本
 ├── package.json           # 前端依赖与构建脚本
 ├── vite.config.js         # Vite 配置
+├── LICENSE                # MIT 许可证
+├── llms.txt               # 供 AI 引擎抓取的项目摘要（llmstxt.org 标准）
 ├── src/                   # SolidJS + TypeScript 前端
 │   ├── App.tsx            # 应用入口 / Tab 布局
 │   ├── store.ts           # 全局状态（文件列表、任务、Tab 定义）
 │   ├── api.ts             # 后端 API 封装
 │   ├── sse.ts             # SSE 进度订阅
+│   ├── addedOutputs.ts    # 已添加产物集合（localStorage 持久化）
+│   ├── filenameTemplate.ts # 全局输出文件名模板（localStorage 持久化）
 │   ├── components/        # Sidebar、Workbench、panels/（11 个功能面板）
 │   └── styles.css         # 全部样式（暗色主题）
 ├── static/                # 静态资源（favicon 等）
