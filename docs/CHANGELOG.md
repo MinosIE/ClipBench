@@ -8,33 +8,20 @@
 
 ## 待提交改动
 
-### 2026-08-27 — 任务列表产物管理重构（替代输出目录管理）+ 输出文件名模板
-- 涉及文件：`app.py`、`src/api.ts`、`src/store.ts`、`src/sse.ts`、`src/App.tsx`、`src/components/Sidebar.tsx`、`src/components/Tasks.tsx`、`src/addedOutputs.ts`（新增）、`src/filenameTemplate.ts`、`src/styles.css`、`vite.config.js`
+### 2026-09-02 — 开源可发现性优化：GitHub 搜索关键词 + MIT 许可证
+- 涉及文件：`README.md`、`LICENSE`（新增）、`llms.txt`（新增）
 
-**P3 输出文件名模板**
-- 后端新增 `_build_output_name(template, src, ext)`：支持占位符 `{name}`(源名) `{ext}`(扩展名) `{ts}`(时间戳) `{date}`(日期) `{time}`(时分秒)；留空回退默认 `{name}_{ts}{ext}`；仅禁止路径穿越与不可见字符（保留中文描述）。
-- 所有任务（去字幕/拆分/截图/转换/压缩/裁剪/合并/旋转/水管/调速/音频提取）产物命名改用模板；前端 `withTemplate()` 在每个任务创建请求体注入全局 `filename_template`。
-- 全局模板存 `src/filenameTemplate.ts`（`filenameTemplate` 信号 + `persistFilenameTemplate` 持久化到 localStorage）；`Sidebar` 底部新增模板输入框 + 占位符说明。
+**MIT 许可证**
+- 新增 `LICENSE`（MIT，© 2026 yuxing.wang）：消除开源项目法律不确定性，GitHub 自动展示许可证标识。
 
-**删除独立「输出产物」区块（与任务列表重复）**
-- 移除 `Sidebar` 的「输出产物」分组、`store` 的 `outputs` 信号 / `refreshOutputs()`、`api.ts` 的 `listOutputs` / `deleteOutput` / `clearOutputs` / `downloadOutputUrl`、后端 `/api/outputs` 三个接口。
-- 任务列表去掉「查看单个结果」链接，保留「下载结果」。
+**README 关键词优化（GitHub 搜索索引 README 全文）**
+- 首段补充英文定位句（video toolbox / video compressor / hardsub & subtitle remover / ffmpeg GUI）。
+- 首段下方新增中英文关键词标签行：视频压缩、去硬字幕、ffmpeg GUI、视频转码、批量视频处理、自托管 + video-compression、subtitle-removal、ffmpeg-gui、video-transcoding、self-hosted 等。
+- 顶部新增 badges（License / Python 3.10+ / ffmpeg / 平台）。
 
-**「显示产物」开关 → 任务列表「添加」按钮**
-- 删除顶栏「显示产物」开关（`showOutputs` / `toggleShowOutputs`）。
-- 新增 `src/addedOutputs.ts`：已添加产物集合（localStorage 键 `cb_added_outputs`），提供 `addOutput` / `removeOutput` / `isOutputAdded`。
-- `Tasks.tsx`：已完成且产物为**单文件视频**（扩展名 mp4/mov/mkv/webm/avi 等）的任务，在「删除」旁新增「添加」按钮 → 产物出现在左侧媒体文件（带「产物」徽标，可二次处理）；已添加则禁用显示「已添加」。
-- `Sidebar.refreshFiles()`：上传文件全保留 + 仅显示手动添加过的产物；删除产物文件时同步从已添加集合移除；删除任务完成自动回流产物的 `createEffect`。
-
-**任务列表统一展示产物资源大小**
-- 后端 `_run_ffmpeg_locked`：compress 走对比记录，其余所有任务（转码/截图/旋转/水印/变速/裁剪/去字幕/音频提取等）统一 `_record_split_result` 记录大小/编码/分辨率/时长；inpaint 与 GIF 片段两条特殊完成路径补齐。
-- `_record_split_result` 多文件分支放宽支持图片/GIF/音频，排除 `thumb_*` / `merge_list_*` / `pal_*` 临时文件。
-- 新增 `backfill_task_sizes()`：启动时为历史已完成但缺大小的任务回填。
-- 前端 `Tasks.tsx`：输出信息 chips 从「仅 split」放宽为 compress 以外的所有已完成且有输出大小的任务；时长 `> 0` 才显示，「片段」改「文件」。
-
-**修复**
-- `store.ts` `upsertTask`：任务完成状态判断 `"done"` → `"finished"`（后端真实状态），修复产物/列表不自动刷新。
-- `vite.config.js` 开启 `sourcemap: true` 便于定位运行时错误；`outputs` 信号改 `createSignal` 修复 `_t is not a function` 崩溃。
+**新增 llms.txt**
+- 按 llmstxt.org 标准，为 AI 搜索引擎/大模型提供项目结构化摘要（功能、场景、快速开始、关键词）。
+- 说明：仅影响 AI 检索，不参与 GitHub 仓库搜索排名。
 
 ### 2026-08-26 — 媒体列表收敛：音频不回流 + 产物显示开关
 - 涉及文件：`app.py`、`src/api.ts`、`src/store.ts`、`src/App.tsx`、`src/components/Sidebar.tsx`、`vite.config.js`、`docs/CHANGELOG.md`
@@ -104,6 +91,29 @@
 ---
 
 ## 已提交记录
+
+### 2026-08-27 — 任务列表产物管理重构（替代输出目录管理）+ 输出文件名模板
+- 提交哈希：`2e2f45a`
+- 涉及文件：`app.py`、`src/api.ts`、`src/store.ts`、`src/sse.ts`、`src/App.tsx`、`src/components/Sidebar.tsx`、`src/components/Tasks.tsx`、`src/addedOutputs.ts`（新增）、`src/filenameTemplate.ts`、`src/styles.css`、`vite.config.js`、`docs/CHANGELOG.md`
+
+**P3 输出文件名模板**
+- 后端新增 `_build_output_name(template, src, ext)`：支持占位符 `{name}`(源名) `{ext}`(扩展名) `{ts}`(时间戳) `{date}`(日期) `{time}`(时分秒)；留空回退默认 `{name}_{ts}{ext}`；仅禁止路径穿越与不可见字符（保留中文描述）。
+- 全局模板存 `src/filenameTemplate.ts`；`Sidebar` 底部新增模板输入框 + 占位符说明。
+
+**删除独立「输出产物」区块（与任务列表重复）**
+- 移除 `Sidebar` 的「输出产物」分组、`store` 的 `outputs` 信号 / `refreshOutputs()`、`api.ts` 产物接口、后端 `/api/outputs` 三个接口。
+- 任务列表去掉「查看单个结果」链接，保留「下载结果」。
+
+**「显示产物」开关 → 任务列表「添加」按钮**
+- 新增 `src/addedOutputs.ts`：已添加产物集合（localStorage 键 `cb_added_outputs`）。
+- `Tasks.tsx`：已完成且产物为单文件视频的任务新增「添加」按钮 → 产物出现在左侧媒体文件可二次处理。
+
+**任务列表统一展示产物资源大小**
+- 后端：compress 走对比记录，其余所有任务统一 `_record_split_result` 记录大小/编码/分辨率/时长；inpaint 与 GIF 片段路径补齐；新增 `backfill_task_sizes()` 回填历史任务。
+- 前端：输出信息 chips 放宽为 compress 以外的所有已完成且有输出大小的任务。
+
+**修复**
+- `upsertTask` 状态判断 `"done"` → `"finished"`；`outputs` 信号改 `createSignal` 修复 `_t is not a function` 崩溃；`vite.config.js` 开启 `sourcemap`。
 
 ### 2026-08-26 — 左右栏折叠功能（含细节打磨）
 - 提交哈希：`841eadf`

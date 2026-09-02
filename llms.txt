@@ -1,0 +1,53 @@
+# ClipBench
+
+> 本地视频处理工具箱：基于 Flask + ffmpeg 的自托管 Web 应用，提供去字幕、拆分、截图、格式转换、压缩、裁剪、合并、旋转、水印、调速、音频提取共 11 个功能。所有处理在本机完成，不上传任何数据。
+
+ClipBench 是一个开源的自托管（self-hosted）视频处理工作台。后端用 Python Flask 调用本机 ffmpeg / ffprobe，前端为 SolidJS + TypeScript + Vite 单页应用。用户在浏览器访问 `http://localhost:8080`，上传视频后即可可视化完成常见处理任务，任务进度通过 SSE（Server-Sent Events）实时推送。
+
+- 仓库：https://github.com/MinosIE/ClipBench
+- 默认端口：8080（避开 macOS AirPlay 占用的 5000，可用 `PORT` 环境变量修改）
+- 运行方式：`./start.sh` 一键启动，自动创建虚拟环境、安装依赖、构建前端并启动服务
+- 技术栈：Python 3.10+ / Flask / ffmpeg / SolidJS / Vite / TypeScript / OpenCV
+
+## 适合谁用
+
+- 想用可视化界面操作 ffmpeg、不想记命令行参数的人
+- 需要去除视频硬字幕（内置字幕）的场景：支持边缘修复 delogo、模糊、马赛克、内容感知修复 inpaint 四种模式
+- 需要本地压缩视频并尽量保画质的场景：自动识别源编码，H.264 源走 libx264、HEVC/H.265 源走 libx265 并保留 HDR10+ 与 master-display 元数据
+- 隐私敏感或离线环境：全程本机处理，无云端上传，不依赖第三方服务
+
+## 功能一览
+
+- **去字幕**：移除硬字幕区域；模式为边缘修复 delogo / 模糊 / 马赛克 / 内容感知修复 inpaint；区域支持整行或指定顶部、底部高度；inpaint 为 CPU 密集任务，串行排队执行
+- **拆分**：按固定时长或自定义片段拆分，可输出 GIF；编码方式可选重编码 H.264（默认，段首强制关键帧避免黑屏）或保留原编码（极速无损）
+- **截图**：单帧截图或按固定间隔批量截帧；输出 jpg / png / webp / avif
+- **格式转换**：任意格式互转，支持 mp4 / mkv / webm / mov / avi / gif 等；可选重编码 + CRF 画质档位、音频开关、`-movflags +faststart`
+- **压缩**：自动识别源编码选择 x264 / x265；可选分辨率缩放（不缩放 / 720p / 480p / 360p）、视频与音频码率、`+faststart`
+- **裁剪**：在预览图上拖拽选区裁剪，支持 16:9 / 9:16 / 1:1 / 4:3 固定比例
+- **合并**：2 个及以上视频按顺序拼接；编码可选 H.264（默认，兼容最好）/ HEVC（体积更小）/ 保留原编码 copy（极速零损，要求各源参数一致）
+- **旋转**：90° / 180° / 270° 旋转 + 水平 / 垂直翻转，可预览
+- **水印**：文字或图片水印，5 个角位 + 缩放 + 透明度；支持 PNG 透明图
+- **调速**：0.5x–4x 变速（步进 0.1），支持倒放
+- **音频提取**：提取视频音轨或转码纯音频，导出 mp3 / m4a / wav / flac
+
+## 快速开始
+
+```bash
+git clone https://github.com/MinosIE/ClipBench.git
+cd ClipBench
+./start.sh          # 自动完成 venv + pip 依赖 + pnpm 构建 + 启动服务
+open http://localhost:8080
+```
+
+未安装 ffmpeg 也能用：依赖中的 `imageio-ffmpeg` 会提供静态 ffmpeg / ffprobe 二进制，系统已安装时优先使用系统版本。
+
+## 关键词 / Keywords
+
+视频处理工具、视频压缩、视频转码、去硬字幕、去除字幕、批量视频处理、ffmpeg 图形界面、ffmpeg GUI、自托管视频工具、本地视频编辑器、开源视频工具、Flask 视频处理、Python 视频处理、视频裁剪、视频合并、视频水印、视频调速、GIF 制作、video compression tool、subtitle removal、hardsub remover、ffmpeg wrapper、ffmpeg GUI、self-hosted video toolbox、open source video editor、local video processing、privacy-friendly video tool
+
+## 文档
+
+- README：https://github.com/MinosIE/ClipBench#readme
+- 完整文档（供 LLM 抓取）：docs/llms-full.txt
+- REST API 概览：README「API 概览」一节，全部接口形如 `/api/*`
+- 变更日志：docs/CHANGELOG.md

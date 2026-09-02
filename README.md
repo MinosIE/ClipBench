@@ -1,6 +1,12 @@
 # ClipBench
 
+![License: MIT](https://img.shields.io/badge/license-MIT-green.svg) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![ffmpeg](https://img.shields.io/badge/ffmpeg-required-orange) ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
+
 本地视频处理工具箱 —— 基于 Flask + ffmpeg 的后端与 SolidJS + Vite 的前端，提供**去字幕、拆分、截图、格式转换、压缩、裁剪、合并、旋转、水印、调速、音频提取** 11 个常用功能。所有处理都在本机完成，不上传任何数据。
+
+> English: A self-hosted **video toolbox** powered by ffmpeg — **video compressor**, **hardsub / subtitle remover**, **ffmpeg GUI**, video transcoding, cutting, merging, watermarking and more. Everything runs locally, nothing is uploaded.
+
+`视频压缩` `去硬字幕` `ffmpeg GUI` `视频转码` `批量视频处理` `自托管` · `video-compression` `subtitle-removal` `ffmpeg-gui` `video-transcoding` `video-cutter` `self-hosted` `flask` `solidjs`
 
 - 端口：**8080**（可用 `PORT` 环境变量修改；默认避开 macOS AirPlay 占用的 5000 端口）
 - 语言：Python 3.10+ / TypeScript
@@ -184,3 +190,11 @@ python -m pytest tests/test_app.py -v
 - **为什么端口是 8080 而不是 5000？** macOS 上 5000 常被 AirPlay Receiver 占用，故默认使用 8080，可用 `PORT=9000 python app.py` 自定义。
 - **没有安装 ffmpeg 能用吗？** 可以。依赖中包含 `imageio-ffmpeg`，后端自动使用其附带的静态 ffmpeg/ffprobe 二进制；如系统已安装则优先使用系统版本。
 - **前端不生效 / 页面是旧版？** 开发模式请运行 `pnpm dev` 并确保后端已启动；生产模式需执行 `pnpm build` 生成 `dist/`，后端会托管该构建产物。
+
+---
+
+## 许可证
+
+本项目基于 [MIT](LICENSE) 许可证开源 —— © 2026 yuxing.wang
+
+可自由使用、复制、修改、合并、发布、分发、再许可及出售副本（含商业用途），只需保留版权与许可声明。软件按「原样」提供，不含任何明示或默示的担保。
