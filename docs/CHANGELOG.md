@@ -8,20 +8,23 @@
 
 ## 待提交改动
 
-### 2026-09-02 — 开源可发现性优化：GitHub 搜索关键词 + MIT 许可证
-- 涉及文件：`README.md`、`LICENSE`（新增）、`llms.txt`（新增）
+### 2026-09-14 — Agent 开发指南 + 启动脚本体验优化 + README 界面预览
+- 涉及文件：`AGENTS.md`（新增）、`start.sh`、`README.md`、`README_EN.md`、`screenshots/shot.png`（新增）、`docs/CHANGELOG.md`
 
-**MIT 许可证**
-- 新增 `LICENSE`（MIT，© 2026 yuxing.wang）：消除开源项目法律不确定性，GitHub 自动展示许可证标识。
+**新增 AGENTS.md（面向 AI Agent 的项目开发指南）**
+- 六节结构：快速上手 / 项目全局认知 / 开发规则 / AI Agent 开发指导 / 文档索引 / 项目状态。
+- 项目全局认知含目录地图（逐行注释职责）、模块职责表（带「不负责」列）、三条数据流箭头图、六条设计原则。
+- Agent 指导含：改动前必读 6 条、禁止修改文件表、9 行改动联动表、11 条真实踩坑（现象 → 根因 → 正确做法）、推荐流程、Debug 排查表、7 项回归清单。
+- 所有路径、命令、行号、localStorage 键名均经实测核对；并标注 `docs/todo.md` 的状态腐化点与技术债。
 
-**README 关键词优化（GitHub 搜索索引 README 全文）**
-- 首段补充英文定位句（video toolbox / video compressor / hardsub & subtitle remover / ffmpeg GUI）。
-- 首段下方新增中英文关键词标签行：视频压缩、去硬字幕、ffmpeg GUI、视频转码、批量视频处理、自托管 + video-compression、subtitle-removal、ffmpeg-gui、video-transcoding、self-hosted 等。
-- 顶部新增 badges（License / Python 3.10+ / ffmpeg / 平台）。
+**start.sh 输出体验优化**
+- 日志按级别上色：青（步骤）/ 绿加粗（成功）/ 黄（警告）/ 红（错误）/ 暗（次要说明）；`[ -t 1 ]` 检测确保重定向到文件时自动关闭颜色，并尊重 `NO_COLOR` 与 `TERM=dumb`。
+- 新增端口预检：端口被占用时输出中文原因、占用 PID 与三种解决方式（停止进程 / 换端口 / 直接访问），替代此前「Flask 英文报错 + pnpm `ELIFECYCLE` exit code 1」的困惑输出。
+- 补充「✔ 前端构建完成」确认、后台启动的停止命令、未装 pnpm 时的后果提示。
 
-**新增 llms.txt**
-- 按 llmstxt.org 标准，为 AI 搜索引擎/大模型提供项目结构化摘要（功能、场景、快速开始、关键词）。
-- 说明：仅影响 AI 检索，不参与 GitHub 仓库搜索排名。
+**README 界面预览**
+- 中英 README 在「功能一览 / Features」前新增「界面预览 / Screenshots」小节，引用 `screenshots/shot.png`（1432×942，160 KB）并配说明性图注。
+- 两份 README 与 `AGENTS.md` 的目录结构同步补充 `screenshots/`。
 
 ### 2026-08-26 — 媒体列表收敛：音频不回流 + 产物显示开关
 - 涉及文件：`app.py`、`src/api.ts`、`src/store.ts`、`src/App.tsx`、`src/components/Sidebar.tsx`、`vite.config.js`、`docs/CHANGELOG.md`
@@ -91,6 +94,20 @@
 ---
 
 ## 已提交记录
+
+### 2026-09-02 — 开源可发现性优化：GitHub 搜索关键词 + MIT 许可证
+- 提交哈希：`43f7868`（README 关键词 / badges、LICENSE、llms.txt）；README 微调见 `6ad89b1`
+- 涉及文件：`README.md`、`LICENSE`（新增）、`llms.txt`（新增）、`docs/CHANGELOG.md`
+
+**MIT 许可证**
+- 新增 `LICENSE`（MIT，© 2026 yuxing.wang）：消除开源项目法律不确定性，GitHub 自动展示许可证标识。
+
+**README 关键词优化（GitHub 搜索索引 README 全文）**
+- 首段补充英文定位句（video toolbox / video compressor / hardsub & subtitle remover / ffmpeg GUI）。
+- 首段下方新增中英文关键词标签行；顶部新增 badges（License / Python 3.10+ / ffmpeg / 平台）。
+
+**新增 llms.txt**
+- 按 llmstxt.org 标准，为 AI 引擎提供项目结构化摘要（仅影响 AI 检索，不参与 GitHub 仓库搜索排名）。
 
 ### 2026-08-27 — 任务列表产物管理重构（替代输出目录管理）+ 输出文件名模板
 - 提交哈希：`2e2f45a`

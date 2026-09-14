@@ -14,6 +14,12 @@ English | [简体中文](README.md)
 
 ---
 
+## Screenshots
+
+![ClipBench UI: media file list on the left, compression panel with smart suggestions in the middle, task list on the right](screenshots/shot.png)
+
+> The **Compress** panel: the suggestion bar derives the recommended codec (H.264), CRF value and estimated size saving from the source video; the tips card on the right explains each option; the task list shows live progress, output size and a download link.
+
 ## Features
 
 | Module | Description | Options |
@@ -154,6 +160,7 @@ clipbench/
 ├── vite.config.js         # Vite config
 ├── LICENSE                # MIT license
 ├── llms.txt               # Machine-readable project summary (llmstxt.org)
+├── screenshots/           # UI screenshots used by the READMEs
 ├── src/                   # SolidJS + TypeScript frontend
 │   ├── App.tsx            # Entry / tab layout
 │   ├── store.ts           # Global state (files, tasks, tab definitions)

@@ -16,6 +16,12 @@
 
 ---
 
+## 界面预览
+
+![ClipBench 主界面：左侧媒体文件列表、中间压缩面板与智能建议、右侧任务列表](screenshots/shot.png)
+
+> 截图展示「压缩」面板：顶部智能建议条依据源视频自动给出推荐编码（H.264）与 CRF 值及预估节省比例；右侧「压缩贴士」解释各参数含义；右侧任务列表实时展示处理进度、产物大小（输出 85.7 KB）与「下载结果」入口。
+
 ## 功能一览
 
 | 模块 | 说明 | 关键参数 |
@@ -157,6 +163,7 @@ clipbench/
 ├── vite.config.js         # Vite 配置
 ├── LICENSE                # MIT 许可证
 ├── llms.txt               # 供 AI 引擎抓取的项目摘要（llmstxt.org 标准）
+├── screenshots/           # 界面截图（README 引用）
 ├── src/                   # SolidJS + TypeScript 前端
 │   ├── App.tsx            # 应用入口 / Tab 布局
 │   ├── store.ts           # 全局状态（文件列表、任务、Tab 定义）
