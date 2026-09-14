@@ -18,7 +18,7 @@
 
 ## 界面预览
 
-![ClipBench 主界面：左侧媒体文件列表、中间压缩面板与智能建议、右侧任务列表](screenshots/shot.png)
+![ClipBench 主界面：左侧媒体文件列表、中间压缩面板与智能建议、右侧任务列表](screenshots/compress-panel.png)
 
 > 截图展示「压缩」面板：顶部智能建议条依据源视频自动给出推荐编码（H.264）与 CRF 值及预估节省比例；右侧「压缩贴士」解释各参数含义；右侧任务列表实时展示处理进度、产物大小（输出 85.7 KB）与「下载结果」入口。
 
@@ -226,6 +226,7 @@ python -m pytest tests/test_app.py -v
 - **为什么端口是 8080 而不是 5000？** macOS 上 5000 常被 AirPlay Receiver 占用，故默认使用 8080，可用 `PORT=9000 python app.py` 自定义。
 - **没有安装 ffmpeg 能用吗？** 可以。依赖中包含 `imageio-ffmpeg`，后端自动使用其附带的静态 ffmpeg/ffprobe 二进制；如系统已安装则优先使用系统版本。
 - **前端不生效 / 页面是旧版？** 开发模式请运行 `pnpm dev` 并确保后端已启动；生产模式需执行 `pnpm build` 生成 `dist/`，后端会托管该构建产物。
+- **启动时打印 `ELIFECYCLE Command failed with exit code 1`？** 这是 pnpm 的包装提示，表示 `start.sh` 以非 0 退出码结束了，**真正原因在它上面几行**。最常见的是端口被占用（8080 已被其他程序占用），此时脚本会直接打印占用进程 PID 与解决方式；也可手动排查：`lsof -ti:8080`，或换端口启动：`PORT=9000 ./start.sh`。
 
 ---
 

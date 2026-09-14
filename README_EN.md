@@ -16,7 +16,7 @@ English | [简体中文](README.md)
 
 ## Screenshots
 
-![ClipBench UI: media file list on the left, compression panel with smart suggestions in the middle, task list on the right](screenshots/shot.png)
+![ClipBench UI: media file list on the left, compression panel with smart suggestions in the middle, task list on the right](screenshots/compress-panel.png)
 
 > The **Compress** panel: the suggestion bar derives the recommended codec (H.264), CRF value and estimated size saving from the source video; the tips card on the right explains each option; the task list shows live progress, output size and a download link.
 
@@ -216,6 +216,7 @@ Manual test checklist: [`tests/manual-test.md`](tests/manual-test.md).
 - **Why port 8080 instead of 5000?** On macOS, 5000 is usually taken by AirPlay Receiver. Use `PORT=9000 python app.py` to change it.
 - **Do I need to install ffmpeg?** No. `imageio-ffmpeg` is a dependency and provides static ffmpeg / ffprobe binaries; a system installation is preferred when present.
 - **The UI looks stale / didn't update.** In dev mode run `pnpm dev` with the backend already running. In production you must run `pnpm build` to regenerate `dist/`, which the backend serves.
+- **Startup fails with `ELIFECYCLE Command failed with exit code 1`.** That is pnpm wrapping a non-zero exit from `start.sh` — the actual cause is a few lines above it. The most common one is the port already being in use (something else on 8080); the script then prints the occupying PID and the options. Manual check: `lsof -ti:8080`, or start on another port: `PORT=9000 ./start.sh`.
 
 ---
 
