@@ -1330,6 +1330,7 @@ def suggest_compress(meta: dict, vcodec_out: str) -> dict:
     """
     vcodec = (meta.get("video_codec") or "").lower()
     src_is_hevc = vcodec in ("hevc", "h265", "h.265")
+    src_is_vp9 = vcodec in ("vp9", "vp8", "av1")  # WebM 常见视频编码
     vb = int(meta.get("video_bitrate") or 0)
     w = int(meta.get("width") or 0)
     h = int(meta.get("height") or 0)
@@ -1337,14 +1338,23 @@ def suggest_compress(meta: dict, vcodec_out: str) -> dict:
     size = int(meta.get("size") or 0)
 
     # 1) 推荐 CRF（与 api_compress 的偏移逻辑同源）
-    if vcodec_out == "hevc":
+    offset = 0
+    if vcodec_out == "webm":
+        codec_label = "VP9"
+        rec_crf = 38  # VP9 CRF 范围约 24-40，38 对应“较小体积、同视觉质量接近 HEVC”
+        if src_is_vp9:
+            offset = 6 + (10 if vb < 2000000 else 0)
+            actual_crf = rec_crf + offset
+        else:
+            actual_crf = rec_crf
+    elif vcodec_out == "hevc":
         codec_label = "HEVC"
         if src_is_hevc:
             offset = 6 + (10 if vb < 2000000 else 0)
-            rec_crf = 22
+            rec_crf = 28  # HEVC CRF 范围 18-34，28 同质量下体积已明显小于 H.264
             actual_crf = rec_crf + offset
         else:
-            rec_crf = 22
+            rec_crf = 28
             actual_crf = rec_crf
     else:
         codec_label = "H.264"
@@ -1379,6 +1389,10 @@ def suggest_compress(meta: dict, vcodec_out: str) -> dict:
         codec_factor = 0.6
     elif vcodec_out == "h264" and src_is_hevc:
         codec_factor = 1.6
+    elif vcodec_out == "webm" and not src_is_vp9:
+        codec_factor = 0.75
+    elif vcodec_out != "webm" and src_is_vp9:
+        codec_factor = 1.4
     vol_factor = scale_factor * crf_factor * codec_factor
     vol_factor = max(0.03, min(1.6, vol_factor))
     est_saving = round((1 - vol_factor) * 100)
@@ -1397,11 +1411,15 @@ def suggest_compress(meta: dict, vcodec_out: str) -> dict:
         tips.append(f"源码率 {mbps:.2f} Mbps，压缩空间大，可放心压到 CRF {rec_crf}")
     else:
         tips.append(f"质量滑块设为 {rec_crf} 可兼顾清晰度与体积")
-    if src_is_hevc and vcodec_out != "hevc":
+    if src_is_vp9 and vcodec_out != "webm":
+        tips.append("VP9/WebM 源将转码为 H.264/MP4，兼容性最佳但体积可能略有增大")
+    elif not src_is_vp9 and vcodec_out == "webm":
+        tips.append("转 WebM/VP9，体积更小、网页友好，但仅 Chrome/Firefox/部分浏览器可播；VP9 同画质 CRF 比 HEVC 高约 10，同等 CRF 下体积通常略大于 HEVC")
+    elif src_is_hevc and vcodec_out != "hevc":
         tips.append("HEVC 源将转码为 H.264 以保证浏览器/设备通用播放，体积可能略有增大")
     elif not src_is_hevc and vcodec_out == "hevc":
         tips.append("H.264 源转 HEVC，体积可再减约 30%，但仅 Safari/部分设备可播")
-    elif src_is_hevc and vcodec_out == "hevc" and actual_crf != rec_crf:
+    elif (src_is_hevc and vcodec_out == "hevc" or src_is_vp9 and vcodec_out == "webm") and actual_crf != rec_crf:
         tips.append(f"后端自动等效偏移 +{actual_crf - rec_crf}，实际编码 CRF ≈ {actual_crf}")
     if is_4k:
         tips.append("4K 源建议降到 1080p，体积可减 60% 以上，观感几乎不变")
@@ -1419,8 +1437,12 @@ def suggest_compress(meta: dict, vcodec_out: str) -> dict:
         summary = f"源码率仅 {mbps:.2f} Mbps，建议轻微压缩或保持原画质"
     elif high_rate:
         summary = f"源码率 {mbps:.2f} Mbps，可放心压到 CRF {rec_crf}"
+    elif src_is_vp9 and vcodec_out != "webm":
+        summary = f"转 H.264/MP4 保证通用播放，CRF {rec_crf} 兼顾体积"
     elif src_is_hevc and vcodec_out != "hevc":
         summary = f"转 H.264 保证浏览器通用，CRF {rec_crf} 兼顾体积"
+    elif vcodec_out == "webm":
+        summary = f"设为 CRF {rec_crf} 可兼顾清晰度与体积（WebM/VP9）"
     else:
         summary = f"设为 CRF {rec_crf} 可兼顾清晰度与体积"
 
@@ -1428,6 +1450,7 @@ def suggest_compress(meta: dict, vcodec_out: str) -> dict:
         "codec_label": codec_label,
         "src_is_hevc": src_is_hevc,
         "out_is_hevc": vcodec_out == "hevc",
+        "out_codec": vcodec_out,
         "rec_crf": rec_crf,
         "actual_crf": actual_crf,
         "rec_scale": rec_scale,
@@ -1460,13 +1483,17 @@ def api_compress():
     faststart = bool(data.get("faststart", False))
     vcodec = (meta.get("video_codec") or "").lower()
     src_is_hevc = vcodec in ("hevc", "h265", "h.265")
+    src_is_vp9 = vcodec in ("vp9", "vp8", "av1")  # WebM 常见视频编码
     # 输出编码：默认 h264 —— 所有浏览器(Chrome/Firefox/Safari/Edge)与设备都能播，
-    # 兼容性最好；可选 hevc —— 体积更小，但仅 Safari/iOS/部分浏览器可解码。
+    # 兼容性最好；hevc —— 体积更小，但仅 Safari/iOS/部分浏览器可解码；
+    # webm —— VP9 编码 + WebM 封装，体积更小、网页友好，但仅 Chrome/Firefox/部分浏览器可播。
     vcodec_out = (data.get("vcodec") or "h264").lower()
     offset = 0
     if vcodec_out == "hevc":
         enc = "libx265"
         codec_label = "HEVC"
+        out_ext = ".mp4"
+        force_tag = True
         # HEVC 源同编码再压：x265 同 CRF 比 x264 更保真，基础偏移 +6 才接近同视觉
         # 质量；源码率已很低(< 2Mbps)时再 +10，避免重新编码后文件反增。
         # H.264→HEVC 转码本身更省空间，直接用用户 CRF 即可，无需偏移。
@@ -1475,28 +1502,47 @@ def api_compress():
             use_crf = crf + offset
         else:
             use_crf = crf
-        # libx265 默认输出 hev1 codec tag，Apple 播放器(QuickTime/Safari)解不出
-        # 画面(表现为只有音频)，强制 hvc1 保证 macOS/iOS 兼容。
-        force_tag = True
+    elif vcodec_out == "webm":
+        enc = "libvpx-vp9"
+        codec_label = "VP9"
+        out_ext = ".webm"
+        force_tag = False
+        # VP9 源同编码再压：与 HEVC 同源逻辑，加偏移避免重编码后文件反增。
+        # 非 VP9 源转 WebM/VP9 直接按用户 CRF 压，无需偏移。
+        if src_is_vp9:
+            offset = 6 + (10 if int(meta.get("video_bitrate") or 0) < 2000000 else 0)
+            use_crf = crf + offset
+        else:
+            use_crf = crf
     else:
         enc = "libx264"
         use_crf = crf
         codec_label = "H.264"
+        out_ext = ".mp4"
         force_tag = False
-    out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, ".mp4")
-    args = ["-i", str(src), "-c:v", enc, "-preset", preset,
-            "-crf", str(use_crf)]
-    if force_tag:
-        args += ["-tag:v", "hvc1"]
+    out = OUTPUT_DIR / _build_output_name(data.get("filename_template"), src, out_ext)
+    if vcodec_out == "webm":
+        # VP9 单遍恒定质量模式：必须 -b:v 0 才走 CRF 控制（否则被默认码率覆盖）；
+        # 速度用 -deadline/-cpu-used（VP9 无 -preset 概念，cpu-used 越大越快质量越低）。
+        cpu = {"veryslow": 0, "slow": 1, "medium": 2, "fast": 3, "veryfast": 4}.get(preset, 2)
+        args = ["-i", str(src), "-c:v", enc, "-crf", str(use_crf), "-b:v", "0",
+                "-deadline", "good", "-cpu-used", str(cpu)]
+        # WebM 标准音频为 Opus（AAC 在 WebM 容器中兼容性差），统一重编码为 Opus 128k。
+        args += ["-c:a", "libopus", "-b:a", "128k"]
+    else:
+        args = ["-i", str(src), "-c:v", enc, "-preset", preset,
+                "-crf", str(use_crf)]
+        if force_tag:
+            args += ["-tag:v", "hvc1"]
+        # 音频：源音频码率已低于 128k 时直接 copy，避免强行升码率导致文件反增；
+        # 否则统一重编码为 AAC 128k。
+        src_a_bitrate = int(meta.get("audio_bitrate") or 0)
+        if src_a_bitrate and src_a_bitrate < 128000:
+            args += ["-c:a", "copy"]
+        else:
+            args += ["-c:a", "aac", "-b:a", "128k"]
     if scale != "original":
         args += ["-vf", f"scale=-2:{scale}"]
-    # 音频：源音频码率已低于 128k 时直接 copy，避免强行升码率导致文件反增；
-    # 否则统一重编码为 AAC 128k。
-    src_a_bitrate = int(meta.get("audio_bitrate") or 0)
-    if src_a_bitrate and src_a_bitrate < 128000:
-        args += ["-c:a", "copy"]
-    else:
-        args += ["-c:a", "aac", "-b:a", "128k"]
     args = _finalize(args, out, faststart)
     task_id = new_task(
         f"压缩 {codec_label} (CRF {use_crf})",

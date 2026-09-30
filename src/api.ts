@@ -334,7 +334,7 @@ export async function compressVideo(params: {
   preset: string;
   crf: number;
   scale: "original" | "1080" | "720" | "480";
-  vcodec?: "h264" | "hevc";
+  vcodec?: "h264" | "hevc" | "webm";
   faststart?: boolean;
 }): Promise<{ task_id: string }> {
   return jsonFetch("/api/compress", {
@@ -349,6 +349,7 @@ export interface CompressSuggestion {
   codec_label: string;
   src_is_hevc: boolean;
   out_is_hevc: boolean;
+  out_codec: string;
   rec_crf: number;
   actual_crf: number;
   rec_scale: string;
@@ -368,7 +369,7 @@ export interface CompressSuggestion {
 
 export async function compressSuggest(
   file_id: string,
-  vcodec: "h264" | "hevc"
+  vcodec: "h264" | "hevc" | "webm"
 ): Promise<CompressSuggestion> {
   return jsonFetch("/api/compress_suggest", {
     method: "POST",

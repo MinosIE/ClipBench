@@ -1,4 +1,4 @@
-import { createSignal, createEffect, Show, For } from "solid-js";
+import { createSignal, createEffect, on, Show, For } from "solid-js";
 import {
   files,
   selectedId,
@@ -31,8 +31,23 @@ export default function CompressPanel() {
     "cb.compress.scale",
     "original"
   );
-  // 输出编码：h264(默认，浏览器/设备通用) | hevc(体积更小，仅部分设备可播)
-  const [vcodec, setVcodec] = persistSignal<"h264" | "hevc">("cb.compress.vcodec", "h264");
+  // 输出编码：h264(默认，浏览器/设备通用) | hevc(体积更小，仅部分设备可播) | webm(VP9，网页友好)
+  const [vcodec, setVcodec] = persistSignal<"h264" | "hevc" | "webm">("cb.compress.vcodec", "h264");
+  // 不同编码器的 CRF 刻度不可直接比较：VP9 范围 24-40、HEVC/H.264 范围 18-34，
+  // 同“视觉质量”下 VP9 需要的 CRF 比 HEVC 高约 10，故默认拉开差距让体积接近。
+  const crfRange = () =>
+    vcodec() === "webm"
+      ? { min: 24, max: 40, def: 38 }
+      : vcodec() === "hevc"
+      ? { min: 18, max: 34, def: 28 }
+      : { min: 18, max: 34, def: 23 };
+  createEffect(
+    on(vcodec, () => {
+      const c = crf();
+      const r = crfRange();
+      if (c < r.min || c > r.max) setCrf(r.def);
+    })
+  );
   const [busy, setBusy] = createSignal(false);
 
   // 智能建议由后端统一计算（/api/compress_suggest），前端不写死任何阈值
@@ -84,7 +99,7 @@ export default function CompressPanel() {
       const f = files.find((x) => x.name === selectedId());
       upsertTask({
         task_id,
-        name: `压缩 ${vcodec() === "hevc" ? "HEVC" : "H.264"} (${preset()}, CRF ${crf()})`,
+        name: `压缩 ${vcodec() === "webm" ? "VP9" : vcodec() === "hevc" ? "HEVC" : "H.264"} (${preset()}, CRF ${crf()})`,
         status: "running",
         progress: 0,
         created_at: Math.floor(Date.now() / 1000),
@@ -127,7 +142,7 @@ export default function CompressPanel() {
             ].join("\n")}
           >
             <span class="suggestion-title">智能建议</span>
-            <span class="s-tag">输出 {s.out_is_hevc ? "HEVC" : "H.264"}</span>
+            <span class="s-tag">输出 {s.out_codec === "webm" ? "VP9" : s.out_codec === "hevc" ? "HEVC" : "H.264"}</span>
             <span class="s-tag">
               质量 CRF <b>{s.rec_crf}</b>
             </span>
@@ -173,9 +188,16 @@ export default function CompressPanel() {
             >
               HEVC (体积更小)
             </button>
+            <button
+              class={vcodec() === "webm" ? "active" : ""}
+              onClick={() => setVcodec("webm")}
+            >
+              WebM (VP9)
+            </button>
           </div>
           <p class="hint">
-            H.264 所有浏览器/设备可播；HEVC 仅 Safari/iOS 等部分设备可播，文件更小
+            H.264 所有浏览器/设备可播；HEVC 仅 Safari/iOS 等部分设备可播，文件更小；
+            WebM/VP9 网页友好、体积更小，但仅 Chrome/Firefox/部分浏览器可播
           </p>
         </div>
 
@@ -210,13 +232,16 @@ export default function CompressPanel() {
           <div class="range-row">
             <input
               type="range"
-              min="18"
-              max="34"
+              min={crfRange().min}
+              max={crfRange().max}
               value={crf()}
               onInput={(e) => setCrf(+e.currentTarget.value)}
             />
             <span class="range-val">{crf()}</span>
           </div>
+          <Show when={vcodec() === "webm"}>
+            <p class="hint">VP9 的 CRF 范围约 24-40（与 HEVC/H.264 刻度不同：同画质下需比 HEVC 高约 10，体积通常略大于 HEVC）</p>
+          </Show>
         </div>
 
         <div class="field">
@@ -241,7 +266,8 @@ export default function CompressPanel() {
         <ul>
           <li><b>智能建议</b> 由后端按源视频参数计算，可直接「一键应用」。</li>
           <li><b>CRF</b> 越大文件越小，18~23 画质损失很小。</li>
-          <li><b>HEVC</b> 比 H.264 体积更小，但兼容性较差。</li>
+          <li><b>HEVC / WebM(VP9)</b> 比 H.264 体积更小，但兼容性较差（仅部分浏览器/设备可播）。</li>
+          <li><b>VP9 vs HEVC</b>：同 CRF 下 HEVC 体积更小、编码更快；想让 VP9 体积接近 HEVC，需把 CRF 调高约 10（如 HEVC 28 ≈ VP9 38）。</li>
           <li>降分辨率（720p/480p）对减小体积最有效。</li>
         </ul>
         <div class="aside-note">

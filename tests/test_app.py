@@ -296,6 +296,44 @@ def test_compress_requires_file(client):
     assert client.post("/api/compress", json={"file_id": "nope.mp4"}).status_code == 404
 
 
+def test_compress_suggest_webm(client, sample_video):
+    fid = _upload(client, sample_video).get_json()["file_id"]
+    resp = client.post(
+        "/api/compress_suggest",
+        json={"file_id": fid, "vcodec": "webm"},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["out_codec"] == "webm"
+    # WebM/VP9 的推荐 CRF 应在其合理区间（约 24-40）
+    assert 24 <= data["rec_crf"] <= 40
+
+
+def test_compress_webm_builds_vp9_args(client, sample_video, monkeypatch):
+    fid = _upload(client, sample_video).get_json()["file_id"]
+    captured = {}
+
+    def fake_start(task_id, args, duration, outdir):
+        captured["args"] = args
+
+    # 拦截 start_task，避免真实调用 ffmpeg，仅校验参数构造
+    monkeypatch.setattr(app_module, "start_task", fake_start)
+    resp = client.post(
+        "/api/compress",
+        json={"file_id": fid, "vcodec": "webm", "crf": 33, "preset": "medium"},
+    )
+    assert resp.status_code == 200
+    args = captured["args"]
+    assert "-c:v" in args and args[args.index("-c:v") + 1] == "libvpx-vp9"
+    # VP9 恒定质量模式必须 -b:v 0
+    assert "-b:v" in args and args[args.index("-b:v") + 1] == "0"
+    assert "-deadline" in args and "-cpu-used" in args
+    # WebM 标准音频为 Opus
+    assert "-c:a" in args and args[args.index("-c:a") + 1] == "libopus"
+    task_id = resp.get_json()["task_id"]
+    assert TASKS[task_id]["output_name"].endswith(".webm")
+
+
 def test_crop_requires_file(client):
     assert client.post("/api/crop", json={"file_id": "nope.mp4"}).status_code == 404
 

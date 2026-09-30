@@ -8,6 +8,25 @@
 
 ## 待提交改动
 
+### 2026-09-30 — 压缩面板支持 WebM(VP9) 输出
+- 涉及文件：`app.py`、`src/api.ts`、`src/components/panels/CompressPanel.tsx`、`tests/test_app.py`
+
+**背景**：WebM 是项目已支持的输入/输出格式，但压缩面板此前只有 H.264 / HEVC 两种输出编码，把 VP9 源当 H.264 重编码会越压越肥（VP9 比 H.264 更省空间）。现压缩面板直接支持 WebM/VP9 输出。
+
+**后端 `app.py`**
+- `api_compress`：新增 `vcodec_out == "webm"` 分支——编码器 `libvpx-vp9`、输出 `.webm` 封装、音频统一重编码为 Opus 128k（AAC 在 WebM 容器中兼容性差）；VP9 单遍恒定质量模式用 `-crf N -b:v 0`（必须 `-b:v 0` 才走 CRF 控制），速度映射 `-deadline good -cpu-used N`（VP9 无 `-preset` 概念）；faststart 对 WebM 无意义（`_finalize` 本就只在 mp4/mov/m4v 追加）。
+- VP9 源二次压缩沿用 HEVC 同源偏移逻辑（避免重编码后文件反增）。
+- `suggest_compress`：新增 WebM/VP9 推荐 CRF（默认 33，范围约 24-40）、编码体积系数（VP9 比 H.264 省约 25%）、并补充 VP9 转码提示文案与摘要；返回新增 `out_codec` 字段。
+
+**前端 `CompressPanel.tsx` + `api.ts`**
+- 输出编码新增「WebM (VP9)」选项；CRF 滑块范围随编码动态切换（WebM 用 24-40，默认 33；H.264 用 18-34）。
+- 切换编码时自动把 CRF 夹到当前编码的合理区间，避免越界无效值。
+- 智能建议栏、提交任务名按 `out_codec` 显示 VP9 / HEVC / H.264。
+- `api.ts`：`compressVideo` / `compressSuggest` 的 `vcodec` 类型扩展为 `h264 | hevc | webm`，`CompressSuggestion` 接口新增 `out_codec`。
+
+**测试**
+- 新增 `test_compress_suggest_webm`（建议返回 `out_codec == "webm"` 且推荐 CRF 落在 24-40）与 `test_compress_webm_builds_vp9_args`（拦截 `start_task`，校验构造出 `libvpx-vp9` + `-b:v 0` + `-deadline`/`-cpu-used` + Opus 音频且产物为 `.webm`）。
+
 ### 2026-09-14 — README 截图命名规范化 + FAQ 补充启动报错排查
 - 涉及文件：`screenshots/compress-panel.png`（由 `shot.png` 重命名）、`README.md`、`README_EN.md`、`docs/CHANGELOG.md`
 
