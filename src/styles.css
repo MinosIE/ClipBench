@@ -759,7 +759,7 @@ button {
 /* 两栏布局：主操作区 + 右侧说明卡，填满宽屏空间、提升信息密度 */
 .tab-panel.two-col {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 248px;
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 16px 22px;
   align-items: stretch;
 }
@@ -786,7 +786,7 @@ button {
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 14px 18px;
   font-size: 12px;
   line-height: 1.6;
   color: var(--muted);
@@ -1225,6 +1225,17 @@ input[type="range"]::-moz-range-thumb {
 .grid2.compact > .field input[type="number"],
 .grid2.compact > .field input[type="text"] {
   max-width: 220px;
+}
+/* 压缩面板：字段少且多为短控件，单列紧凑排列，避免两列留空 */
+.form-card.compress-form {
+  display: flex;
+  flex-direction: column;
+}
+.form-card.compress-form > .field {
+  margin-bottom: 8px;
+}
+.form-card.compress-form > .field:last-child {
+  margin-bottom: 0;
 }
 /* 时间区间列表：紧凑行，标签+起止输入+删除键 */
 .seg-list {

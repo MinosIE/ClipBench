@@ -172,7 +172,7 @@ export default function CompressPanel() {
         )}
       </Show>
 
-      <div class="form-card grid2 compact">
+      <div class="form-card compress-form">
         <div class="field col-span">
           <label>输出编码</label>
           <div class="seg">
@@ -180,24 +180,23 @@ export default function CompressPanel() {
               class={vcodec() === "h264" ? "active" : ""}
               onClick={() => setVcodec("h264")}
             >
-              H.264 (通用兼容)
+              H.264 (通用·体积最大)
             </button>
             <button
               class={vcodec() === "hevc" ? "active" : ""}
               onClick={() => setVcodec("hevc")}
             >
-              HEVC (体积更小)
+              HEVC (体积最小)
             </button>
             <button
               class={vcodec() === "webm" ? "active" : ""}
               onClick={() => setVcodec("webm")}
             >
-              WebM (VP9)
+              WebM (VP9·接近HEVC)
             </button>
           </div>
           <p class="hint">
-            H.264 所有浏览器/设备可播；HEVC 仅 Safari/iOS 等部分设备可播，文件更小；
-            WebM/VP9 网页友好、体积更小，但仅 Chrome/Firefox/部分浏览器可播
+            H.264 兼容最好但体积最大；HEVC 体积最小（仅部分设备可播）；WebM/VP9 网页友好、体积接近 HEVC。详细对比见右侧压缩贴士。
           </p>
         </div>
 
@@ -266,7 +265,11 @@ export default function CompressPanel() {
         <ul>
           <li><b>智能建议</b> 由后端按源视频参数计算，可直接「一键应用」。</li>
           <li><b>CRF</b> 越大文件越小，18~23 画质损失很小。</li>
-          <li><b>HEVC / WebM(VP9)</b> 比 H.264 体积更小，但兼容性较差（仅部分浏览器/设备可播）。</li>
+          <li><b>同画质体积排序：HEVC &lt; WebM/VP9 &lt; H.264</b>
+            <br />· <b>H.264</b>：兼容性最好（所有浏览器/设备可播），但体积最大。
+            <br />· <b>HEVC</b>：体积最小（同画质约比 H.264 小 30%+），但仅 Safari/iOS 等部分设备可播。
+            <br />· <b>WebM/VP9</b>：体积接近 HEVC、略大于 HEVC，网页友好，但仅 Chrome/Firefox/部分浏览器可播。
+          </li>
           <li><b>VP9 vs HEVC</b>：同 CRF 下 HEVC 体积更小、编码更快；想让 VP9 体积接近 HEVC，需把 CRF 调高约 10（如 HEVC 28 ≈ VP9 38）。</li>
           <li>降分辨率（720p/480p）对减小体积最有效。</li>
         </ul>
